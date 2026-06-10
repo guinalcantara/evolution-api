@@ -61,6 +61,14 @@ curl -I http://localhost:8080/
 curl -I http://localhost:3101/
 ```
 
+## URLs uteis
+
+- Chatwoot URL no Evolution: `http://chatwoot:3000`
+- Chatwoot no navegador: `http://localhost:3002`
+- Evolution API: `http://localhost:8080`
+- Evolution Manager: `http://localhost:3101`
+- Webhook do Chatwoot para esta instancia: `http://api:8080/chatwoot/webhook/guilherme-telefone`
+
 ## Logs
 
 Chatwoot:

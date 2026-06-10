@@ -1,6 +1,6 @@
 services:
   chatwoot-init:
-    image: chatwoot/chatwoot:v4.14.1-ce
+    image: guilhermena/chatwoot:latest #chatwoot/chatwoot:v4.14.1-ce
     entrypoint: ["/app/docker/entrypoints/rails.sh"]
     command: ["bundle", "exec", "rails", "db:chatwoot_prepare"]
     env_file:
@@ -14,7 +14,7 @@ services:
       - chatwoot-net
 
   chatwoot:
-    image: chatwoot/chatwoot:v4.14.1-ce
+    image: guilhermena/chatwoot:latest #chatwoot/chatwoot:v4.14.1-ce
     container_name: chatwoot_official
     restart: unless-stopped
     entrypoint: ["/app/docker/entrypoints/rails.sh"]
@@ -36,7 +36,7 @@ services:
       - chatwoot-net
 
   chatwoot-sidekiq:
-    image: chatwoot/chatwoot:v4.14.1-ce
+    image: guilhermena/chatwoot:latest #chatwoot/chatwoot:v4.14.1-ce
     container_name: chatwoot_sidekiq
     restart: unless-stopped
     entrypoint: ["/app/docker/entrypoints/rails.sh"]
