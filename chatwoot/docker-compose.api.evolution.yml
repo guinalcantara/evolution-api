@@ -1,0 +1,54 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: evolution_api_dev
+    restart: unless-stopped
+    env_file:
+      - ./env_api_evolution.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - chatwoot-net
+    volumes:
+      - ../instances:/evolution/instances
+
+  postgres:
+    image: postgres:15
+    container_name: evolution_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evolution_api
+      POSTGRES_USER: evolution_user
+      POSTGRES_PASSWORD: evolution_password
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    networks:
+      - chatwoot-net
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: evolution_redis_dev
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - evolution_redis_data:/data
+    networks:
+      - chatwoot-net
+    ports:
+      - "6379:6379"
+
+volumes:
+  evolution_postgres_data:
+  evolution_redis_data:
+
+networks:
+  chatwoot-net:
+    external: true
+    name: chatwoot-net
