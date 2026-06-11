@@ -1,8 +1,9 @@
 services:
   api:
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    image: guilhermena/evolution-api:latest
+    # build:
+    #   context: ..
+    #   dockerfile: Dockerfile
     container_name: evolution_api_dev
     restart: unless-stopped
     env_file:
