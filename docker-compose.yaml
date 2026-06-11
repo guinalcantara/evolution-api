@@ -14,7 +14,6 @@ services:
       - evolution_instances:/evolution/instances
     networks:
       - evolution-net
-      - dokploy-network
     env_file:
       - .env
     expose:
@@ -22,10 +21,12 @@ services:
 
   frontend:
     container_name: evolution_frontend
-    image: evoapicloud/evolution-manager:latest
+    build:
+      context: ./evolution-manager-v2
+      dockerfile: Dockerfile
     restart: always
     ports:
-      - "3000:80"
+      - "3001:80"
     networks:
       - evolution-net
 
@@ -39,9 +40,6 @@ services:
       - evolution_redis:/data
     networks:
       evolution-net:
-        aliases:
-          - evolution-redis
-      dokploy-network:
         aliases:
           - evolution-redis
     expose:
@@ -67,7 +65,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - evolution-net
-      - dokploy-network
     expose:
       - "5432"
 
@@ -80,5 +77,3 @@ networks:
   evolution-net:
     name: evolution-net
     driver: bridge
-  dokploy-network:
-    external: true

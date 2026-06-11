@@ -12,5 +12,8 @@
   "prisma-smart-formatter.prisma.defaultFormatter": "Prisma.prisma",
   "i18n-ally.localesPaths": [
     "store/messages"
-  ]
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "docker compose": true
+  }
 }

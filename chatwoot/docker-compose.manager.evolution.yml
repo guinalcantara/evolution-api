@@ -1,0 +1,18 @@
+services:
+  manager:
+    build:
+      context: ../evolution-manager-v2
+      dockerfile: Dockerfile
+    container_name: evolution_manager_official
+    restart: unless-stopped
+    env_file:
+      - ./env_manager_evolutioon.env
+    ports:
+      - "3101:80"
+    networks:
+      - chatwoot-net
+
+networks:
+  chatwoot-net:
+    external: true
+    name: chatwoot-net
