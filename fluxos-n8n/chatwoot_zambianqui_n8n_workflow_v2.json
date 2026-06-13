@@ -1,0 +1,1123 @@
+{
+  "name": "Chatwoot - Fluxo Zambianqui Completo v17",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "Zambianqui v17\n\nAlteração desta versão:\n- Quando o cliente não responde no bot e a mensagem de inatividade é enviada, a conversa também é marcada como RESOLVED/fechada.\n- Mantida a remoção de time/agente fora do n8n, via automações do Chatwoot.\n- Mantidos menu, ASO, labels, atribuição final, transbordo, lembrete e encerramento.\n",
+        "height": 520,
+        "width": 540
+      },
+      "id": "db6d644b-9a97-4cf9-a26d-eb39e85901b3",
+      "name": "Resumo v17",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -520,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chatwoot-zambianqui",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c5e056be-c0c5-43c0-b270-3f6431efffe8",
+      "name": "Webhook Chatwoot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        40,
+        100
+      ],
+      "webhookId": "072c1752-2b07-4286-b0ac-b8cecb07b9d7"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { source: 'webhook', payload: $json } }];"
+      },
+      "id": "2336d885-d53a-41b6-87ea-5cf51d2358aa",
+      "name": "Origem Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "d401a640-1e28-44eb-b337-da421d4dc2b5",
+      "name": "Monitor a cada 1 minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        40,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { source: 'monitor', payload: $json } }];"
+      },
+      "id": "2c572bd0-ccd3-42ea-88ab-0582ab0e53e4",
+      "name": "Origem Monitor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst config = {\n  chatwootBaseUrl: 'http://host.docker.internal:3002',\n  token: 'TFfPdVfAtxARnvviUd96geG3',\n  accountId: 2,\n\n  // TODAS AS REGRAS EM MINUTOS\n  regrasMinutos: {\n    // Cliente parou de responder no bot: encerra sessão e volta pro bot na próxima mensagem\n    botInatividadeMinutos: 2,\n\n    // Fila sem atendente responder: transborda conforme regra da fila\n    filaSemAtendenteMinutos: 3,\n\n    // Atendente humano sem resposta do cliente: envia lembrete automático\n    lembreteClienteMinutos: 4,\n\n    // Sem resposta após lembrete: encerra e etiqueta INATIVO\n    encerrarAposLembreteMinutos: 5\n  },\n\n  // Preencha com os IDs reais dos times no Chatwoot\n  teams: {\n    comercial_ma: 1,\n    tecnico_ma: 2,\n    financeiro_ma: 3,\n    comercial_sst: 4,\n    aso_sst: 5,\n    tecnico_sst: 6,\n    financeiro_sst: 7,\n\n    // fallback geral\n    fila_geral_renan: 0,\n\n    // transbordo conforme escopo\n    transbordo_ma: 8,\n    transbordo_sst: 8\n  }\n};\n\nreturn [{\n  json: {\n    source: $json.source,\n    payload: $json.payload,\n    config\n  }\n}];\n"
+      },
+      "id": "76794bb1-4f80-4efb-b5d3-e9ebd46ee87b",
+      "name": "Configurar IDs e Regras",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "4010486b-e8fa-467d-9c35-74290c918a87",
+              "leftValue": "={{ $json.source }}",
+              "rightValue": "webhook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "06c8b393-33d8-4ef6-a43d-85d0322c03e2",
+      "name": "IF - origem webhook",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        700,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst envelope = $('Configurar IDs e Regras').item.json;\nconst body = envelope.payload?.body || {};\nconst config = envelope.config;\nconst data = $getWorkflowStaticData('global');\n\nconst baseUrl = config.chatwootBaseUrl;\nconst apiToken = config.token;\nconst event = body.event;\nconst DEFAULT_ACCOUNT_ID = config.accountId || 2;\n\nconst accountId =\n  body.account?.id ||\n  body.account_id ||\n  body.conversation?.account_id ||\n  body.messages?.[0]?.account_id ||\n  DEFAULT_ACCOUNT_ID;\n\nconst conversationId =\n  body.conversation?.id ||\n  body.id ||\n  body.messages?.[0]?.conversation_id;\n\nconst inboxId =\n  body.inbox?.id ||\n  body.inbox_id ||\n  body.conversation?.inbox_id;\n\nconst messageId = body.id || body.messages?.[0]?.id || null;\nconst sourceId = body.source_id || body.messages?.[0]?.source_id || '';\n\nconst contentRaw = body.content || body.messages?.[0]?.content || '';\nconst content = String(contentRaw || '').trim();\nconst normalized = content.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim();\n\nconst rawMessageType = body.message_type;\nconst numericMessageType = body.messages?.[0]?.message_type;\nconst messageType =\n  rawMessageType ||\n  (numericMessageType === 0 ? 'incoming' : numericMessageType === 1 ? 'outgoing' : numericMessageType);\n\nconst isPrivate = body.private === true || body.messages?.[0]?.private === true;\nconst conversation = body.conversation || body;\nconst attrs = conversation.custom_attributes || {};\nconst labels = conversation.labels || body.labels || [];\nconst status = body.status || conversation.status || '';\n\nconst isClientMessage = event === 'message_created' && messageType === 'incoming' && !isPrivate;\nconst isAgentMessage = event === 'message_created' && messageType === 'outgoing' && !isPrivate;\nconst isResolvedConversation = event === 'conversation_status_changed' && status === 'resolved';\n\nconst looksLikeBotOutgoing =\n  content.includes('Olá! Seja bem-vindo') ||\n  content.includes('Perfeito! Vou te direcionar') ||\n  content.includes('Ótimo! Já estou conectando') ||\n  content.includes('Dados recebidos com sucesso') ||\n  content.includes('Como ainda não houve resposta') ||\n  content.includes('Só passando pra ver se ainda posso te ajudar') ||\n  content.includes('Como não tivemos retorno');\nconst isCreatedConversation = event === 'conversation_created';\nconst isOpenConversation = event === 'conversation_status_changed' && status === 'open';\n\nconst etapa = attrs.etapa || '';\nconst fluxo = attrs.fluxo || '';\nconst fallback = Number(attrs.fallback_count || 0);\nconst nowIso = new Date().toISOString();\nconst resolvedKey = `resolved_${conversationId}`;\nconst lastMenuKey = `last_menu_sent_${conversationId}`;\n\nfunction canSendMenuNow() {\n  const last = Number(data[lastMenuKey] || 0);\n  return Date.now() - last > 20000;\n}\n\nfunction markMenuSent() {\n  data[lastMenuKey] = Date.now();\n}\n\nconst menuPrincipal =\n`Olá! Seja bem-vindo(a) à Zambianqui Ambiental 👋\n\nÉ um prazer te atender! Para levar sua mensagem à pessoa certa, me conta:\n\n1️⃣ – Meio Ambiente / Georreferenciamento\n2️⃣ – Segurança do Trabalho\n\nÉ só digitar o número da opção! 😊`;\n\nconst submenuMA =\n`Perfeito! Vou te direcionar para a equipe de Meio Ambiente 🌿\n\nComo podemos te ajudar hoje?\n\n1️⃣ – Orçamentos e Informações Comerciais\n2️⃣ – Suporte Técnico / Andamento de Processo\n3️⃣ – Financeiro MA / Pagamentos\n\nDigite o número da opção!`;\n\nconst submenuSST =\n`Perfeito! Vou te direcionar para a equipe de Segurança do Trabalho 🦺\n\nComo podemos te ajudar hoje?\n\n1️⃣ – Orçamentos e Informações Comerciais\n2️⃣ – ASO / Atestado de Saúde Ocupacional\n3️⃣ – Técnico / Laudos e Documentos\n4️⃣ – Financeiro SST / Pagamentos\n\nDigite o número da opção!`;\n\nconst transferMsg =\n`Ótimo! Já estou conectando você com nossa equipe 🟢\n\nEm instantes alguém te atende.\nObrigado pela paciência! 😊`;\n\nconst foraHorarioMsg =\n`Olá! Obrigado por entrar em contato com a Zambianqui Ambiental 💚\n\nNo momento estamos fora do horário de atendimento.\n\n🕗 Segunda a sexta: 8h às 12h | 13h30 às 18h\n\nSua mensagem foi registrada e retornamos assim que abrirmos! Até logo 😊`;\n\nasync function api(method, path, body) {\n  const res = await this.helpers.httpRequest({\n    method,\n    url: `${baseUrl}${path}`,\n    headers: { api_access_token: apiToken, 'Content-Type': 'application/json' },\n    body,\n    json: true,\n  });\n  return res || {};\n}\n\n// Obtém horário diretamente do Chatwoot.\n// Se a sua versão do Chatwoot não retornar working_hours/open_hours no endpoint da inbox,\n// o fluxo assume \"aberto\" para não bloquear atendimento.\nasync function isInboxOpenFromChatwoot() {\n  if (!inboxId) return true;\n\n  let inbox = {};\n  try {\n    inbox = await api.call(this, 'GET', `/api/v1/accounts/${accountId}/inboxes/${inboxId}`);\n  } catch (e) {\n    return true;\n  }\n\n  const enabled =\n    inbox.working_hours_enabled ??\n    inbox.enable_working_hours ??\n    inbox.out_of_office_enabled ??\n    false;\n\n  if (!enabled) return true;\n\n  const hours =\n    inbox.working_hours ||\n    inbox.open_hours ||\n    inbox.working_hours_config ||\n    inbox.availability?.working_hours ||\n    [];\n\n  if (!Array.isArray(hours) || hours.length === 0) return true;\n\n  const tz = inbox.timezone || inbox.time_zone || 'America/Sao_Paulo';\n  const parts = new Intl.DateTimeFormat('en-US', {\n    timeZone: tz,\n    weekday: 'short',\n    hour: '2-digit',\n    minute: '2-digit',\n    hour12: false\n  }).formatToParts(new Date());\n\n  const wdText = parts.find(p => p.type === 'weekday')?.value;\n  const hour = Number(parts.find(p => p.type === 'hour')?.value);\n  const minute = Number(parts.find(p => p.type === 'minute')?.value);\n  const wdMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };\n  const day = wdMap[wdText];\n\n  function dayMatches(rule) {\n    const d = rule.day_of_week ?? rule.day ?? rule.weekday;\n    if (typeof d === 'number') return d === day || d === day + 1;\n    if (typeof d === 'string') return d.toLowerCase().startsWith(wdText.toLowerCase().slice(0, 3));\n    return false;\n  }\n\n  function toMinutes(h, m) {\n    return Number(h || 0) * 60 + Number(m || 0);\n  }\n\n  const nowMin = hour * 60 + minute;\n\n  for (const rule of hours) {\n    if (!dayMatches(rule)) continue;\n    if (rule.closed_all_day === true || rule.closed === true) return false;\n    if (rule.open_all_day === true) return true;\n\n    const open = rule.open_time || rule.from || rule.start_time;\n    const close = rule.close_time || rule.to || rule.end_time;\n\n    let start, end;\n\n    if (typeof open === 'string' && typeof close === 'string') {\n      const [oh, om] = open.split(':').map(Number);\n      const [ch, cm] = close.split(':').map(Number);\n      start = toMinutes(oh, om);\n      end = toMinutes(ch, cm);\n    } else {\n      start = toMinutes(rule.open_hour ?? rule.start_hour, rule.open_minutes ?? rule.start_minute);\n      end = toMinutes(rule.close_hour ?? rule.end_hour, rule.close_minutes ?? rule.end_minute);\n    }\n\n    if (nowMin >= start && nowMin <= end) return true;\n  }\n\n  return false;\n}\n\nfunction token() {\n  return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;\n}\n\nfunction merged(nextAttrs) {\n  return { ...attrs, ...nextAttrs };\n}\n\nfunction result(overrides = {}) {\n  return {\n    accountId,\n    conversationId,\n    inboxId,\n    event,\n    status,\n    content,\n    normalized,\n    attrs,\n    labels,\n\n    shouldResetOnStart: false,\n    shouldSend: false,\n    shouldSaveAttributes: false,\n    shouldSetLabels: false,\n    shouldClearAssignment: false,\n    shouldAssignTeam: false,\n\n    message: '',\n    privateMessage: false,\n    customAttributes: {},\n    labelsToSet: [],\n    targetTeamId: 0,\n    targetTeamName: '',\n    debug_reason: '',\n    ...overrides\n  };\n}\n\nfunction waitAttrs(nextAttrs) {\n  return merged({\n    ...nextAttrs,\n    aguardando_cliente: 'true',\n    inactivity_token: token(),\n    inactivity_started_at: nowIso,\n    ultima_interacao_bot: nowIso\n  });\n}\n\nfunction noBotWaitAttrs(nextAttrs) {\n  return merged({\n    ...nextAttrs,\n    aguardando_cliente: 'false',\n    inactivity_token: '',\n    inactivity_started_at: '',\n    ultima_interacao_bot: nowIso\n  });\n}\n\nfunction outsideHours(reason) {\n  return result({\n    shouldResetOnStart: true,\n    shouldSetLabels: true,\n    labelsToSet: ['bot', 'novo_atendimento'],\n    shouldClearAssignment: true,\n    shouldSend: true,\n    message: foraHorarioMsg,\n    shouldSaveAttributes: true,\n    customAttributes: {\n      fluxo: 'fora_horario',\n      submenu: '',\n      etapa: 'fora_horario',\n      empresa: '',\n      colaborador: '',\n      cpf: '',\n      funcao: '',\n      tipo_exame: '',\n      fallback_count: '0',\n      aguardando_cliente: 'false',\n      inactivity_token: '',\n      inactivity_started_at: '',\n      aguardando_agente: 'false',\n      aguardando_cliente_humano: 'false',\n      lembrete_cliente_enviado: 'false',\n      ultima_interacao_bot: nowIso\n    },\n    debug_reason: reason\n  });\n}\n\nasync function startMenu(reason) {\n  const open = await isInboxOpenFromChatwoot.call(this);\n  if (!open) return outsideHours('fora_horario_' + reason);\n\n  if (!canSendMenuNow()) {\n    return result({ debug_reason: 'menu_suprimido_anti_duplicidade_' + reason });\n  }\n\n  delete data[resolvedKey];\n  markMenuSent();\n\n  return result({\n    shouldResetOnStart: true,\n    shouldSetLabels: true,\n    labelsToSet: ['bot', 'novo_atendimento'],\n    shouldClearAssignment: true,\n    shouldSend: true,\n    message: menuPrincipal,\n    shouldSaveAttributes: true,\n    customAttributes: {\n      fluxo: 'menu_principal',\n      submenu: '',\n      etapa: 'aguardando_menu_principal',\n      empresa: '',\n      colaborador: '',\n      cpf: '',\n      funcao: '',\n      tipo_exame: '',\n      fallback_count: '0',\n      aguardando_cliente: 'true',\n      inactivity_token: token(),\n      inactivity_started_at: nowIso,\n      aguardando_agente: 'false',\n      aguardando_cliente_humano: 'false',\n      lembrete_cliente_enviado: 'false',\n      ultima_interacao_bot: nowIso\n    },\n    debug_reason: reason\n  });\n}\n\nfunction startMenuFromConversationEvent(reason) {\n  if (!canSendMenuNow()) {\n    return result({ debug_reason: 'menu_suprimido_anti_duplicidade_' + reason });\n  }\n\n  delete data[resolvedKey];\n  markMenuSent();\n\n  return result({\n    shouldResetOnStart: true,\n    shouldSetLabels: true,\n    labelsToSet: ['bot', 'novo_atendimento'],\n    shouldClearAssignment: true,\n    shouldSend: true,\n    message: menuPrincipal,\n    shouldSaveAttributes: true,\n    customAttributes: {\n      fluxo: 'menu_principal',\n      submenu: '',\n      etapa: 'aguardando_menu_principal',\n      empresa: '',\n      colaborador: '',\n      cpf: '',\n      funcao: '',\n      tipo_exame: '',\n      fallback_count: '0',\n      aguardando_cliente: 'true',\n      inactivity_token: token(),\n      inactivity_started_at: nowIso,\n      aguardando_agente: 'false',\n      aguardando_cliente_humano: 'false',\n      lembrete_cliente_enviado: 'false',\n      ultima_interacao_bot: nowIso\n    },\n    debug_reason: reason\n  });\n}\n\nfunction fallbackMenu(currentEtapa, currentFluxo, currentSubmenu, menuText) {\n  if (fallback >= 1) {\n    const teamId = 0;\n    return result({\n      shouldSend: true,\n      message: 'Sem problema! Vou te conectar com nossa equipe agora.\\nUm momento! 🟢',\n      shouldSaveAttributes: true,\n      customAttributes: noBotWaitAttrs({\n        fluxo: currentFluxo || fluxo || 'atendimento',\n        submenu: currentSubmenu || attrs.submenu || '',\n        etapa: 'aguardando_humano',\n        fallback_count: '0',\n        aguardando_agente: 'true',\n        aguardando_cliente_humano: 'false',\n        humano_started_at: nowIso,\n        last_customer_message_at: nowIso,\n        last_agent_message_at: '',\n        transbordo_realizado: 'false',\n        lembrete_cliente_enviado: 'false'\n      }),\n      shouldAssignTeam: teamId > 0,\n      targetTeamId: teamId,\n      targetTeamName: 'Sem fila geral',\n      debug_reason: 'fallback_2_transferir_humano'\n    });\n  }\n\n  return result({\n    shouldSend: true,\n    message: `Oi! Não consegui entender sua mensagem 😊\n\nPode digitar o número da opção desejada?\n\n${menuText}`,\n    shouldSaveAttributes: true,\n    customAttributes: waitAttrs({\n      fluxo: currentFluxo || fluxo || 'menu_principal',\n      submenu: currentSubmenu || attrs.submenu || '',\n      etapa: currentEtapa,\n      fallback_count: String(fallback + 1)\n    }),\n    debug_reason: 'fallback_1_repetir_menu'\n  });\n}\n\nfunction ask(message, nextAttrs, reason) {\n  return result({\n    shouldSend: true,\n    message,\n    shouldSaveAttributes: true,\n    customAttributes: waitAttrs(nextAttrs),\n    debug_reason: reason\n  });\n}\n\nfunction transferToHuman({flow, submenu, teamKey, teamName, labelsToSet = []}) {\n  const teamId = Number(config.teams[teamKey] || 0);\n  return result({\n    shouldSend: true,\n    message: transferMsg,\n    shouldSaveAttributes: true,\n    customAttributes: noBotWaitAttrs({\n      fluxo: flow,\n      submenu,\n      etapa: 'aguardando_humano',\n      fallback_count: '0',\n      aguardando_agente: 'true',\n      aguardando_cliente_humano: 'false',\n      humano_started_at: nowIso,\n      last_customer_message_at: nowIso,\n      last_agent_message_at: '',\n      transbordo_realizado: 'false',\n      lembrete_cliente_enviado: 'false'\n    }),\n    shouldSetLabels: labelsToSet.length > 0,\n    labelsToSet,\n    shouldAssignTeam: teamId > 0,\n    targetTeamId: teamId,\n    targetTeamName: teamName,\n    debug_reason: `transferir_${teamName}`\n  });\n}\n\nif (!conversationId || !accountId) return [{ json: result({ debug_reason: 'sem_account_ou_conversation' }) }];\n\n// Nova conversa OU conversa reaberta:\n// limpa labels, time e agente, mas NÃO envia menu aqui.\n// O menu será enviado apenas no message_created/incoming,\n// evitando duplicidade quando o Chatwoot dispara múltiplos eventos.\nif (isCreatedConversation || isOpenConversation) {\n  delete data[resolvedKey];\n\n  return [{\n    json: result({\n      shouldResetOnStart: true,\n      shouldSetLabels: true,\n      labelsToSet: ['bot', 'novo_atendimento'],\n      shouldClearAssignment: true,\n      shouldSaveAttributes: false,\n      debug_reason: isCreatedConversation ? 'nova_conversa_reset_operacional' : 'conversa_reaberta_reset_operacional'\n    })\n  }];\n}\n\nif (isResolvedConversation) {\n  data[resolvedKey] = Date.now();\n  return [{\n    json: result({\n      shouldSaveAttributes: true,\n      customAttributes: {\n        fluxo: 'encerrado',\n        submenu: '',\n        etapa: 'encerrado',\n        empresa: '',\n        colaborador: '',\n        cpf: '',\n        funcao: '',\n        tipo_exame: '',\n        fallback_count: '0',\n        aguardando_cliente: 'false',\n        inactivity_token: '',\n        inactivity_started_at: '',\n        aguardando_agente: 'false',\n        aguardando_cliente_humano: 'false',\n        lembrete_cliente_enviado: 'false',\n        ultima_interacao_bot: nowIso\n      },\n      debug_reason: 'conversa_resolvida_estado_encerrado'\n    })\n  }];\n}\n\nif (isAgentMessage && !looksLikeBotOutgoing && (String(etapa).startsWith('aguardando_humano') || etapa === 'atendimento_humano')) {\n  return [{\n    json: result({\n      shouldSaveAttributes: true,\n      customAttributes: merged({\n        etapa: 'atendimento_humano',\n        aguardando_agente: 'false',\n        aguardando_cliente_humano: 'true',\n        last_agent_message_at: nowIso,\n        lembrete_cliente_enviado: 'false',\n        lembrete_cliente_enviado_at: '',\n        ultima_interacao_bot: nowIso\n      }),\n      debug_reason: 'atendente_respondeu_aguardando_cliente'\n    })\n  }];\n}\n\nif (isClientMessage && (String(etapa).startsWith('aguardando_humano') || etapa === 'atendimento_humano')) {\n  return [{\n    json: result({\n      shouldSaveAttributes: true,\n      customAttributes: merged({\n        etapa: 'aguardando_humano',\n        aguardando_agente: 'true',\n        aguardando_cliente_humano: 'false',\n        last_customer_message_at: nowIso,\n        lembrete_cliente_enviado: 'false',\n        lembrete_cliente_enviado_at: '',\n        ultima_interacao_bot: nowIso\n      }),\n      debug_reason: 'cliente_respondeu_aguardando_agente'\n    })\n  }];\n}\n\nif (!isClientMessage) return [{ json: result({ debug_reason: `ignorado_evento_${event}_${status}` }) }];\n\nif (data[resolvedKey] || !etapa || etapa === 'encerrado' || etapa === 'finalizado' || etapa === 'fora_horario') {\n  return [{ json: await startMenu.call(this, 'iniciar_fluxo_por_mensagem_cliente') }];\n}\n\nif (etapa === 'aguardando_menu_principal') {\n  if (normalized === '1') {\n    return [{ json: ask(submenuMA, { fluxo: 'meio_ambiente', submenu: 'menu_ma', etapa: 'aguardando_submenu_ma', fallback_count: '0' }, 'submenu_ma') }];\n  }\n  if (normalized === '2') {\n    return [{ json: ask(submenuSST, { fluxo: 'sst', submenu: 'menu_sst', etapa: 'aguardando_submenu_sst', fallback_count: '0' }, 'submenu_sst') }];\n  }\n  return [{ json: fallbackMenu('aguardando_menu_principal', 'menu_principal', '', '1️⃣ – Meio Ambiente / Georreferenciamento\\n2️⃣ – Segurança do Trabalho') }];\n}\n\nif (etapa === 'aguardando_submenu_ma') {\n  if (normalized === '1') return [{ json: transferToHuman({ flow: 'meio_ambiente', submenu: 'comercial_ma', teamKey: 'comercial_ma', teamName: 'Comercial MA', labelsToSet: ['bot', 'novo_atendimento', 'ma-lead'] }) }];\n  if (normalized === '2') return [{ json: transferToHuman({ flow: 'meio_ambiente', submenu: 'tecnico_ma', teamKey: 'tecnico_ma', teamName: 'Técnico MA', labelsToSet: ['bot', 'novo_atendimento'] }) }];\n  if (normalized === '3') return [{ json: transferToHuman({ flow: 'meio_ambiente', submenu: 'financeiro_ma', teamKey: 'financeiro_ma', teamName: 'Financeiro MA', labelsToSet: ['bot', 'novo_atendimento'] }) }];\n  return [{ json: fallbackMenu('aguardando_submenu_ma', 'meio_ambiente', 'menu_ma', '1️⃣ – Orçamentos e Informações Comerciais\\n2️⃣ – Suporte Técnico / Andamento de Processo\\n3️⃣ – Financeiro MA / Pagamentos') }];\n}\n\nif (etapa === 'aguardando_submenu_sst') {\n  if (normalized === '1') return [{ json: transferToHuman({ flow: 'sst', submenu: 'comercial_sst', teamKey: 'comercial_sst', teamName: 'Comercial SST', labelsToSet: ['bot', 'novo_atendimento', 'sst-lead'] }) }];\n  if (normalized === '3') return [{ json: transferToHuman({ flow: 'sst', submenu: 'tecnico_sst', teamKey: 'tecnico_sst', teamName: 'Técnico SST', labelsToSet: ['bot', 'novo_atendimento'] }) }];\n  if (normalized === '4') return [{ json: transferToHuman({ flow: 'sst', submenu: 'financeiro_sst', teamKey: 'financeiro_sst', teamName: 'Financeiro SST', labelsToSet: ['bot', 'novo_atendimento'] }) }];\n  if (normalized === '2') {\n    return [{ json: ask(`Olá! Para gerarmos o ASO com agilidade, preciso de algumas informações 📋\n\nPrimeiro, me informe o nome da empresa.`, { fluxo: 'sst', submenu: 'aso_sst', etapa: 'aso_aguardando_empresa', fallback_count: '0' }, 'iniciar_aso') }];\n  }\n  return [{ json: fallbackMenu('aguardando_submenu_sst', 'sst', 'menu_sst', '1️⃣ – Orçamentos e Informações Comerciais\\n2️⃣ – ASO / Atestado de Saúde Ocupacional\\n3️⃣ – Técnico / Laudos e Documentos\\n4️⃣ – Financeiro SST / Pagamentos') }];\n}\n\nif (etapa === 'aso_aguardando_empresa') {\n  return [{ json: ask('Perfeito. Agora me informe o nome completo do colaborador.', { empresa: content, fluxo: 'sst', submenu: 'aso_sst', etapa: 'aso_aguardando_colaborador', fallback_count: '0' }, 'aso_empresa_salva') }];\n}\n\nif (etapa === 'aso_aguardando_colaborador') {\n  return [{ json: ask('Obrigado. Agora me informe o CPF do colaborador.', { colaborador: content, fluxo: 'sst', submenu: 'aso_sst', etapa: 'aso_aguardando_cpf', fallback_count: '0' }, 'aso_colaborador_salvo') }];\n}\n\nif (etapa === 'aso_aguardando_cpf') {\n  const cpfDigits = normalized.replace(/\\D/g, '');\n  if (cpfDigits.length !== 11) {\n    return [{ json: ask('O CPF parece estar em formato inválido. Por favor, envie com 11 números. Exemplo: 12345678900', { fluxo: 'sst', submenu: 'aso_sst', etapa: 'aso_aguardando_cpf' }, 'cpf_invalido') }];\n  }\n  return [{ json: ask('Certo. Agora me informe a função exercida pelo colaborador.', { cpf: cpfDigits, fluxo: 'sst', submenu: 'aso_sst', etapa: 'aso_aguardando_funcao', fallback_count: '0' }, 'aso_cpf_salvo') }];\n}\n\nif (etapa === 'aso_aguardando_funcao') {\n  return [{ json: ask(`Perfeito. Agora informe o tipo de exame:\n\n1️⃣ – Admissional\n2️⃣ – Periódico\n3️⃣ – Demissional\n4️⃣ – Retorno ao trabalho\n5️⃣ – Mudança de função`, { funcao: content, fluxo: 'sst', submenu: 'aso_sst', etapa: 'aso_aguardando_tipo_exame', fallback_count: '0' }, 'aso_funcao_salva') }];\n}\n\nif (etapa === 'aso_aguardando_tipo_exame') {\n  const tipos = {\n    '1': 'Admissional',\n    '2': 'Periódico',\n    '3': 'Demissional',\n    '4': 'Retorno ao trabalho',\n    '5': 'Mudança de função',\n    'admissional': 'Admissional',\n    'periodico': 'Periódico',\n    'demissional': 'Demissional',\n    'retorno ao trabalho': 'Retorno ao trabalho',\n    'mudanca de funcao': 'Mudança de função'\n  };\n\n  const tipo = tipos[normalized];\n\n  if (!tipo) {\n    return [{ json: fallbackMenu('aso_aguardando_tipo_exame', 'sst', 'aso_sst', '1️⃣ – Admissional\\n2️⃣ – Periódico\\n3️⃣ – Demissional\\n4️⃣ – Retorno ao trabalho\\n5️⃣ – Mudança de função') }];\n  }\n\n  const teamId = Number(config.teams.aso_sst || 0);\n  return [{\n    json: result({\n      shouldSend: true,\n      message: `Dados recebidos com sucesso ✅\n\nEmpresa: ${attrs.empresa || ''}\nColaborador: ${attrs.colaborador || ''}\nCPF: ${attrs.cpf || ''}\nFunção: ${attrs.funcao || ''}\nTipo de exame: ${tipo}\n\nPode enviar os documentos do colaborador aqui mesmo.\nJá estou conectando você com a equipe de ASO. 🟢`,\n      shouldSaveAttributes: true,\n      customAttributes: noBotWaitAttrs({\n        fluxo: 'sst',\n        submenu: 'aso_sst',\n        tipo_exame: tipo,\n        etapa: 'aguardando_humano_aso',\n        fallback_count: '0',\n        aguardando_agente: 'true',\n        aguardando_cliente_humano: 'false',\n        humano_started_at: nowIso,\n        last_customer_message_at: nowIso,\n        last_agent_message_at: '',\n        transbordo_realizado: 'false',\n        lembrete_cliente_enviado: 'false'\n      }),\n      shouldSetLabels: true,\n      labelsToSet: ['bot', 'novo_atendimento', 'sst-aso-solicitado'],\n      shouldAssignTeam: teamId > 0,\n      targetTeamId: teamId,\n      targetTeamName: 'ASO SST',\n      debug_reason: 'aso_finalizado_transferir'\n    })\n  }];\n}\n\nreturn [{ json: result({ debug_reason: 'estado_nao_mapeado' }) }];\n"
+      },
+      "id": "232fa66a-8a76-4b35-a8e0-fa9441443892",
+      "name": "Decidir proxima acao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Configurar IDs e Regras').item.json.config.accountId }}/conversations?status=open",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3f6e4e92-a7ce-4331-91b2-77e518181aa6",
+      "name": "Listar conversas abertas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json || {};\nconst config = $('Configurar IDs e Regras').item.json.config;\nconst now = Date.now();\n\nfunction minutesSince(iso) {\n  if (!iso) return 0;\n  const t = new Date(iso).getTime();\n  if (Number.isNaN(t)) return 0;\n  return (now - t) / 60000;\n}\n\nfunction extractConversations(response) {\n  if (Array.isArray(response)) return response;\n  if (Array.isArray(response.payload)) return response.payload;\n  if (Array.isArray(response.data?.payload)) return response.data.payload;\n  if (Array.isArray(response.conversations)) return response.conversations;\n  return [];\n}\n\nfunction attrsOf(c) {\n  return c.custom_attributes || c.additional_attributes?.custom_attributes || {};\n}\n\nfunction labelsOf(c) {\n  return c.labels || [];\n}\n\nconst msgBotInativo =\n`Olá! 😊\n\nComo não tivemos retorno, vou encerrar esta etapa do atendimento automático por aqui.\n\nQuando quiser continuar, é só mandar uma nova mensagem que iniciamos novamente. 💚`;\n\nconst msgTransbordo =\n`Como ainda não houve resposta da fila, estou direcionando seu atendimento para nosso time de apoio. 🟢`;\n\nconst msgLembrete =\n`Oi! Tudo bem? 😊\n\nSó passando pra ver se ainda posso te ajudar com alguma coisa!\n\nSe precisar, é só responder aqui 🟢`;\n\nconst msgEncerramento =\n`Olá! 😊\n\nComo não tivemos retorno, vamos encerrar esse atendimento por aqui.\n\nQualquer coisa é só mandar mensagem — estaremos prontos para te ajudar!\n\nAté logo! 💚\n_Zambianqui Ambiental_`;\n\nconst conversations = extractConversations(response);\nconst actions = [];\n\nfor (const c of conversations) {\n  const id = c.id;\n  const attrs = attrsOf(c);\n  const labels = labelsOf(c);\n  const etapa = attrs.etapa || '';\n  const fluxo = attrs.fluxo || '';\n\n  // 1) Cliente parou de responder no bot\n  if (\n    attrs.aguardando_cliente === 'true' &&\n    !String(etapa).startsWith('aguardando_humano') &&\n    etapa !== 'atendimento_humano' &&\n    minutesSince(attrs.inactivity_started_at) >= Number(config.regrasMinutos.botInatividadeMinutos)\n  ) {\n    actions.push({\n      json: {\n        conversationId: id,\n        action: 'bot_inatividade',\n        shouldSend: true,\n        message: msgBotInativo,\n        shouldResolve: true,\n        shouldSaveAttributes: true,\n        customAttributes: {\n          ...attrs,\n          fluxo: 'encerrado',\n          submenu: '',\n          etapa: 'encerrado',\n          aguardando_cliente: 'false',\n          inactivity_token: '',\n          inactivity_started_at: '',\n          ultima_interacao_bot: new Date().toISOString()\n        }\n      }\n    });\n    continue;\n  }\n\n  // 2) Fila sem atendente responder\n  if (\n    attrs.aguardando_agente === 'true' &&\n    attrs.transbordo_realizado !== 'true' &&\n    (String(etapa).startsWith('aguardando_humano') || etapa === 'atendimento_humano') &&\n    minutesSince(attrs.last_customer_message_at || attrs.humano_started_at) >= Number(config.regrasMinutos.filaSemAtendenteMinutos)\n  ) {\n    let teamId = 0;\n    if (fluxo === 'meio_ambiente') teamId = Number(config.teams.transbordo_ma || 0);\n    if (fluxo === 'sst') teamId = Number(config.teams.transbordo_sst || 0);\n\n    actions.push({\n      json: {\n        conversationId: id,\n        action: 'transbordo',\n        shouldSend: true,\n        message: msgTransbordo,\n        shouldAssignTeam: teamId > 0,\n        targetTeamId: teamId,\n        shouldSaveAttributes: true,\n        customAttributes: {\n          ...attrs,\n          transbordo_realizado: 'true',\n          transbordo_em: new Date().toISOString(),\n          transbordo_team_id: String(teamId),\n          ultima_interacao_bot: new Date().toISOString()\n        }\n      }\n    });\n    continue;\n  }\n\n  // 3) Atendente humano sem resposta do cliente\n  if (\n    attrs.aguardando_cliente_humano === 'true' &&\n    attrs.lembrete_cliente_enviado !== 'true' &&\n    minutesSince(attrs.last_agent_message_at) >= Number(config.regrasMinutos.lembreteClienteMinutos)\n  ) {\n    actions.push({\n      json: {\n        conversationId: id,\n        action: 'lembrete_cliente',\n        shouldSend: true,\n        message: msgLembrete,\n        shouldSaveAttributes: true,\n        customAttributes: {\n          ...attrs,\n          lembrete_cliente_enviado: 'true',\n          lembrete_cliente_enviado_at: new Date().toISOString(),\n          ultima_interacao_bot: new Date().toISOString()\n        }\n      }\n    });\n    continue;\n  }\n\n  // 4) Sem resposta após lembrete\n  if (\n    attrs.aguardando_cliente_humano === 'true' &&\n    attrs.lembrete_cliente_enviado === 'true' &&\n    minutesSince(attrs.lembrete_cliente_enviado_at) >= Number(config.regrasMinutos.encerrarAposLembreteMinutos)\n  ) {\n    actions.push({\n      json: {\n        conversationId: id,\n        action: 'encerrar_inativo',\n        shouldSend: true,\n        message: msgEncerramento,\n        shouldSetLabels: true,\n        labelsToSet: Array.from(new Set([...labels, 'inativo'])),\n        shouldSaveAttributes: true,\n        shouldResolve: true,\n        customAttributes: {\n          ...attrs,\n          fluxo: 'encerrado',\n          etapa: 'encerrado',\n          aguardando_cliente_humano: 'false',\n          aguardando_agente: 'false',\n          ultima_interacao_bot: new Date().toISOString()\n        }\n      }\n    });\n    continue;\n  }\n}\n\nif (actions.length === 0) {\n  return [{ json: { action: 'sem_acao', shouldSend: false, shouldSaveAttributes: false, shouldAssignTeam: false, shouldSetLabels: false, shouldResolve: false } }];\n}\n\nreturn actions;\n"
+      },
+      "id": "dde8998d-e9a4-411b-84cb-ceb51b05a4e9",
+      "name": "Monitorar regras de tempo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "04c76810-5425-4535-9271-edc2e3274be5",
+              "leftValue": "={{ $json.shouldResetOnStart }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3cb65de5-861b-4ce8-a827-0ff3ce788be7",
+      "name": "IF - resetar inicio",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Decidir proxima acao').item.json.accountId }}/conversations/{{ $('Decidir proxima acao').item.json.conversationId }}/labels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"labels\": {{ JSON.stringify($('Decidir proxima acao').item.json.labelsToSet) }}\n}"
+      },
+      "id": "33cde593-c73b-4e21-aee6-a13f697e34cb",
+      "name": "Resetar labels inicio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c21c598a-550e-4980-bd7c-d1dee5beafdd",
+              "leftValue": "={{ $('Decidir proxima acao').item.json.shouldSend }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6b8f73cb-808e-4b71-91be-0819255114b9",
+      "name": "IF - enviar mensagem",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Decidir proxima acao').item.json.accountId }}/conversations/{{ $('Decidir proxima acao').item.json.conversationId }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": {{ JSON.stringify($('Decidir proxima acao').item.json.message) }},\n  \"message_type\": \"outgoing\",\n  \"private\": {{ $('Decidir proxima acao').item.json.privateMessage || false }}\n}"
+      },
+      "id": "55032e56-da14-44f4-a65e-5f013530333d",
+      "name": "Enviar mensagem Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "2021bb81-9058-4432-a7d3-c134e3feb15e",
+              "leftValue": "={{ $('Decidir proxima acao').item.json.shouldSaveAttributes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "76bafd60-36f5-47fb-a768-e8b721f0dddd",
+      "name": "IF - salvar atributos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Decidir proxima acao').item.json.accountId }}/conversations/{{ $('Decidir proxima acao').item.json.conversationId }}/custom_attributes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"custom_attributes\": {{ JSON.stringify($('Decidir proxima acao').item.json.customAttributes) }}\n}"
+      },
+      "id": "da21c1c2-c97b-4c7a-8d97-0d458da6f6df",
+      "name": "Salvar atributos conversa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "fca44fe8-0987-4420-815b-d5ac11edb3a7",
+              "leftValue": "={{ $('Decidir proxima acao').item.json.shouldSetLabels && !$('Decidir proxima acao').item.json.shouldResetOnStart }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4378c2c0-f2fb-4e20-9534-ec03ef275b88",
+      "name": "IF - atualizar labels",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Decidir proxima acao').item.json.accountId }}/conversations/{{ $('Decidir proxima acao').item.json.conversationId }}/labels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"labels\": {{ JSON.stringify($('Decidir proxima acao').item.json.labelsToSet) }}\n}"
+      },
+      "id": "74ee7674-29e4-4f14-857a-c9a3f5ae6cb6",
+      "name": "Atualizar labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "547cf67d-c555-4d53-ac72-0fc3189d81cd",
+              "leftValue": "={{ $('Decidir proxima acao').item.json.shouldAssignTeam }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7d3c07a8-3f1b-472f-aa91-9ae6415fd507",
+      "name": "IF - atribuir time",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Decidir proxima acao').item.json.accountId }}/conversations/{{ $('Decidir proxima acao').item.json.conversationId }}/assignments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"team_id\": {{ $('Decidir proxima acao').item.json.targetTeamId }}\n}"
+      },
+      "id": "1bed6b86-472a-4d9f-9625-7d1d63886073",
+      "name": "Atribuir time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "137895ac-88ec-42ab-bc74-9c0d66fa034f",
+              "leftValue": "={{ $json.shouldSend }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a9d967c2-5212-4d79-a667-179433e4b23f",
+      "name": "IF Monitor - enviar mensagem",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Configurar IDs e Regras').item.json.config.accountId }}/conversations/{{ $json.conversationId }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": {{ JSON.stringify($json.message) }},\n  \"message_type\": \"outgoing\",\n  \"private\": false\n}"
+      },
+      "id": "1b407898-1f9d-4815-875e-c01adefe30bf",
+      "name": "Monitor - enviar mensagem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "6293f636-aa08-4f91-87a2-194d49e972ff",
+              "leftValue": "={{ $json.shouldSaveAttributes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "29f8e26e-0cb8-4507-9154-889436aee799",
+      "name": "IF Monitor - salvar atributos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Configurar IDs e Regras').item.json.config.accountId }}/conversations/{{ $json.conversationId }}/custom_attributes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"custom_attributes\": {{ JSON.stringify($json.customAttributes) }}\n}"
+      },
+      "id": "184513b3-8c26-4e22-8fc6-b033bbc9bf56",
+      "name": "Monitor - salvar atributos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "11d088d3-a51a-4552-b194-d95fd164f1ec",
+              "leftValue": "={{ $json.shouldAssignTeam }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "80078d30-1782-4f70-baf5-ae9ce764506f",
+      "name": "IF Monitor - atribuir time",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Configurar IDs e Regras').item.json.config.accountId }}/conversations/{{ $json.conversationId }}/assignments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"team_id\": {{ $json.targetTeamId }}\n}"
+      },
+      "id": "500e2427-2ab0-4a0c-b25a-99df849b04bb",
+      "name": "Monitor - atribuir time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "bab5c16f-fad3-48b9-8e54-e3c8808eea17",
+              "leftValue": "={{ $json.shouldSetLabels }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "026cba73-e5e4-41ec-954d-281b54a36a03",
+      "name": "IF Monitor - labels",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Configurar IDs e Regras').item.json.config.accountId }}/conversations/{{ $json.conversationId }}/labels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"labels\": {{ JSON.stringify($json.labelsToSet) }}\n}"
+      },
+      "id": "a10aa7cd-06c0-4bf5-b751-ee499e8ae2b8",
+      "name": "Monitor - atualizar labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "70122674-03b4-4ee8-9b2f-c7c0fafbe7d4",
+              "leftValue": "={{ $json.shouldResolve }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "28035984-f317-4719-9964-d8c60a40f832",
+      "name": "IF Monitor - resolver",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        1220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configurar IDs e Regras').item.json.config.chatwootBaseUrl }}/api/v1/accounts/{{ $('Configurar IDs e Regras').item.json.config.accountId }}/conversations/{{ $json.conversationId }}/toggle_status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "={{ $('Configurar IDs e Regras').item.json.config.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"status\": \"resolved\"\n}"
+      },
+      "id": "fdbb92b2-f652-4061-ad80-cb493f9c0fd9",
+      "name": "Monitor - resolver conversa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Chatwoot": {
+      "main": [
+        [
+          {
+            "node": "Origem Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Origem Webhook": {
+      "main": [
+        [
+          {
+            "node": "Configurar IDs e Regras",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monitor a cada 1 minuto": {
+      "main": [
+        [
+          {
+            "node": "Origem Monitor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Origem Monitor": {
+      "main": [
+        [
+          {
+            "node": "Configurar IDs e Regras",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configurar IDs e Regras": {
+      "main": [
+        [
+          {
+            "node": "IF - origem webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - origem webhook": {
+      "main": [
+        [
+          {
+            "node": "Decidir proxima acao",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Listar conversas abertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir proxima acao": {
+      "main": [
+        [
+          {
+            "node": "IF - resetar inicio",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF - atualizar labels",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF - atribuir time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - resetar inicio": {
+      "main": [
+        [
+          {
+            "node": "Resetar labels inicio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF - enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resetar labels inicio": {
+      "main": [
+        [
+          {
+            "node": "IF - enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - enviar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem Chatwoot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF - salvar atributos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem Chatwoot": {
+      "main": [
+        [
+          {
+            "node": "IF - salvar atributos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - salvar atributos": {
+      "main": [
+        [
+          {
+            "node": "Salvar atributos conversa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF - atualizar labels": {
+      "main": [
+        [
+          {
+            "node": "Atualizar labels",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF - atribuir time": {
+      "main": [
+        [
+          {
+            "node": "Atribuir time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Listar conversas abertas": {
+      "main": [
+        [
+          {
+            "node": "Monitorar regras de tempo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monitorar regras de tempo": {
+      "main": [
+        [
+          {
+            "node": "IF Monitor - enviar mensagem",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Monitor - salvar atributos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Monitor - atribuir time",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Monitor - labels",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Monitor - resolver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Monitor - enviar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Monitor - enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF Monitor - salvar atributos": {
+      "main": [
+        [
+          {
+            "node": "Monitor - salvar atributos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF Monitor - atribuir time": {
+      "main": [
+        [
+          {
+            "node": "Monitor - atribuir time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF Monitor - labels": {
+      "main": [
+        [
+          {
+            "node": "Monitor - atualizar labels",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF Monitor - resolver": {
+      "main": [
+        [
+          {
+            "node": "Monitor - resolver conversa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 2,
+  "updatedAt": "2026-06-13T00:00:00.000Z",
+  "versionId": "ac17b44d-295f-4329-ac34-ba6a9685f005"
+}

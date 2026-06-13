@@ -5,6 +5,7 @@ Este diretório reúne os `docker-compose` usados para subir:
 - `chatwoot/docker-compose.chatwoot.yml`
 - `chatwoot/docker-compose.api.evolution.yml`
 - `chatwoot/docker-compose.manager.evolution.yml`
+- `chatwoot/docker-compose.n8n.yml`
 
 ## Requisitos
 
@@ -29,7 +30,7 @@ docker compose -f chatwoot/docker-compose.chatwoot.yml up -d --wait --wait-timeo
 
 ### 2. Evolution API
 
-Sobe a API da Evolution a partir do Dockerfile do projeto:
+Sobe a API da Evolution usando a imagem do Docker Hub:
 
 ```bash
 docker compose -f chatwoot/docker-compose.api.evolution.yml up -d
@@ -37,10 +38,18 @@ docker compose -f chatwoot/docker-compose.api.evolution.yml up -d
 
 ### 3. Evolution Manager
 
-Sobe o manager da Evolution com build local do projeto `evolution-manager-v2`:
+Sobe o manager da Evolution usando a imagem do Docker Hub:
 
 ```bash
-docker compose -f chatwoot/docker-compose.manager.evolution.yml up -d --build
+docker compose -f chatwoot/docker-compose.manager.evolution.yml up -d
+```
+
+### 4. N8N
+
+Sobe o n8n oficial com banco proprio:
+
+```bash
+docker compose -f chatwoot/docker-compose.n8n.yml up -d
 ```
 
 ## Verificacao rapida
@@ -51,6 +60,7 @@ Confira o estado dos containers:
 docker compose -f chatwoot/docker-compose.chatwoot.yml ps
 docker compose -f chatwoot/docker-compose.api.evolution.yml ps
 docker compose -f chatwoot/docker-compose.manager.evolution.yml ps
+docker compose -f chatwoot/docker-compose.n8n.yml ps
 ```
 
 Teste as portas publicadas:
@@ -67,7 +77,14 @@ curl -I http://localhost:3101/
 - Chatwoot no navegador: `http://localhost:3002`
 - Evolution API: `http://localhost:8080`
 - Evolution Manager: `http://localhost:3101`
+- N8N: `http://n8n.local:5678`
 - Webhook do Chatwoot para esta instancia: `http://api:8080/chatwoot/webhook/guilherme-telefone`
+
+Para usar `n8n.local` no Windows, adicione no arquivo `hosts`:
+
+```text
+127.0.0.1 n8n.local
+```
 
 ## Logs
 
@@ -90,10 +107,18 @@ Manager:
 docker compose -f chatwoot/docker-compose.manager.evolution.yml logs -f manager
 ```
 
+N8N:
+
+```bash
+docker compose -f chatwoot/docker-compose.n8n.yml logs -f n8n
+docker compose -f chatwoot/docker-compose.n8n.yml logs -f n8n-postgres
+```
+
 ## Parar os servicos
 
 ```bash
 docker compose -f chatwoot/docker-compose.manager.evolution.yml down
+docker compose -f chatwoot/docker-compose.n8n.yml down
 docker compose -f chatwoot/docker-compose.api.evolution.yml down
 docker compose -f chatwoot/docker-compose.chatwoot.yml down
 ```

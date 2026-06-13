@@ -1,0 +1,226 @@
+services:
+  chatwoot-init:
+    image: guilhermena/chatwoot:latest
+    entrypoint: ["/app/docker/entrypoints/rails.sh"]
+    command: ["bundle", "exec", "rails", "db:chatwoot_prepare"]
+    env_file:
+      - ./.env
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+    networks:
+      - chatwoot-net
+
+  chatwoot:
+    image: guilhermena/chatwoot:latest
+    container_name: chatwoot_full
+    restart: unless-stopped
+    entrypoint: ["/app/docker/entrypoints/rails.sh"]
+    command: ["bundle", "exec", "rails", "server", "-p", "3000", "-b", "0.0.0.0"]
+    env_file:
+      - ./.env
+    volumes:
+      - chatwoot_storage_data:/app/storage
+    ports:
+      - "3002:3000"
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+      chatwoot-init:
+        condition: service_completed_successfully
+    networks:
+      - chatwoot-net
+
+  chatwoot-sidekiq:
+    image: guilhermena/chatwoot:latest
+    container_name: chatwoot_sidekiq_full
+    restart: unless-stopped
+    entrypoint: ["/app/docker/entrypoints/rails.sh"]
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    env_file:
+      - ./.env
+    volumes:
+      - chatwoot_storage_data:/app/storage
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+      chatwoot-init:
+        condition: service_completed_successfully
+    networks:
+      - chatwoot-net
+
+  chatwoot-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: chatwoot_postgres_full
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${CHATWOOT_POSTGRES_DB}
+      POSTGRES_USER: ${CHATWOOT_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${CHATWOOT_POSTGRES_PASSWORD}
+    volumes:
+      - chatwoot_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CHATWOOT_POSTGRES_USER} -d ${CHATWOOT_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - chatwoot-net
+
+  chatwoot-redis:
+    image: redis:7-alpine
+    container_name: chatwoot_redis_full
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - chatwoot_redis_data:/data
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - chatwoot-net
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: chatwoot_mailhog_full
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - chatwoot-net
+
+  api:
+    image: guilhermena/evolution-api:latest
+    container_name: evolution_api_full
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    volumes:
+      - ../instances:/evolution/instances
+    networks:
+      - chatwoot-net
+
+  evolution-postgres:
+    image: postgres:15
+    container_name: evolution_postgres_full
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${EVO_POSTGRES_DB}
+      POSTGRES_USER: ${EVO_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${EVO_POSTGRES_PASSWORD}
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${EVO_POSTGRES_USER} -d ${EVO_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - chatwoot-net
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution_redis_full
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - evolution_redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - chatwoot-net
+
+  manager:
+    image: guilhermena/evolution-manager-v2:latest
+    container_name: evolution_manager_full
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "3101:80"
+    depends_on:
+      - api
+    networks:
+      - chatwoot-net
+
+  n8n-postgres:
+    image: postgres:15
+    container_name: n8n_postgres_full
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${N8N_POSTGRES_DB}
+      POSTGRES_USER: ${N8N_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${N8N_POSTGRES_PASSWORD}
+    volumes:
+      - n8n_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${N8N_POSTGRES_USER} -d ${N8N_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - chatwoot-net
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n_full
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    depends_on:
+      n8n-postgres:
+        condition: service_healthy
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - chatwoot-net
+
+volumes:
+  chatwoot_postgres_data:
+  chatwoot_redis_data:
+  chatwoot_storage_data:
+  evolution_postgres_data:
+  evolution_redis_data:
+  n8n_postgres_data:
+  n8n_data:
+
+networks:
+  chatwoot-net:
+    external: true
+    name: chatwoot-net
