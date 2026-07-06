@@ -1,4 +1,5 @@
-import { ChatwootRouter } from '@api/integrations/chatbot/chatwoot/routes/chatwoot.router';
+﻿import { ChatwootRouter } from '@api/integrations/chatbot/chatwoot/routes/chatwoot.router';
+import { AtendePlusRouter } from '@api/integrations/chatbot/atendeplus/routes/atendeplus.router';
 import { DifyRouter } from '@api/integrations/chatbot/dify/routes/dify.router';
 import { OpenaiRouter } from '@api/integrations/chatbot/openai/routes/openai.router';
 import { TypebotRouter } from '@api/integrations/chatbot/typebot/routes/typebot.router';
@@ -17,6 +18,7 @@ export class ChatbotRouter {
 
     this.router.use('/evolutionBot', new EvolutionBotRouter(...guards).router);
     this.router.use('/chatwoot', new ChatwootRouter(...guards).router);
+    this.router.use('/atendeplus', new AtendePlusRouter(...guards).router);
     this.router.use('/typebot', new TypebotRouter(...guards).router);
     this.router.use('/openai', new OpenaiRouter(...guards).router);
     this.router.use('/dify', new DifyRouter(...guards).router);
@@ -25,3 +27,4 @@ export class ChatbotRouter {
     this.router.use('/evoai', new EvoaiRouter(...guards).router);
   }
 }
+

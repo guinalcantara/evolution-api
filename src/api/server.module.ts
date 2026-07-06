@@ -1,4 +1,4 @@
-import { CacheEngine } from '@cache/cacheengine';
+﻿import { CacheEngine } from '@cache/cacheengine';
 import { Chatwoot, configService, ProviderSession } from '@config/env.config';
 import { eventEmitter } from '@config/event.config';
 import { Logger } from '@config/logger.config';
@@ -20,6 +20,8 @@ import { BaileysController } from './integrations/channel/whatsapp/baileys.contr
 import { ChatbotController } from './integrations/chatbot/chatbot.controller';
 import { ChatwootController } from './integrations/chatbot/chatwoot/controllers/chatwoot.controller';
 import { ChatwootService } from './integrations/chatbot/chatwoot/services/chatwoot.service';
+import { AtendePlusController } from './integrations/chatbot/atendeplus/controllers/atendeplus.controller';
+import { AtendePlusService } from './integrations/chatbot/atendeplus/services/atendeplus.service';
 import { DifyController } from './integrations/chatbot/dify/controllers/dify.controller';
 import { DifyService } from './integrations/chatbot/dify/services/dify.service';
 import { EvoaiController } from './integrations/chatbot/evoai/controllers/evoai.controller';
@@ -84,6 +86,9 @@ export const proxyController = new ProxyController(proxyService, waMonitor);
 const chatwootService = new ChatwootService(waMonitor, configService, prismaRepository, chatwootCache);
 export const chatwootController = new ChatwootController(chatwootService, configService);
 
+const atendePlusService = new AtendePlusService(configService);
+export const atendePlusController = new AtendePlusController(atendePlusService, configService);
+
 const settingsService = new SettingsService(waMonitor);
 export const settingsController = new SettingsController(settingsService);
 
@@ -139,3 +144,4 @@ const evoaiService = new EvoaiService(waMonitor, prismaRepository, configService
 export const evoaiController = new EvoaiController(evoaiService, prismaRepository, waMonitor);
 
 logger.info('Module - ON');
+
