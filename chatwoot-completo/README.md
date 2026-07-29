@@ -24,6 +24,7 @@ docker network inspect chatwoot-net >/dev/null 2>&1 || docker network create cha
 
 ```bash
 docker compose -f chatwoot-completo/docker-compose.yml up -d --wait --wait-timeout 300
+
 ```
 
 ## Imagens
@@ -39,7 +40,7 @@ docker compose -f chatwoot-completo/docker-compose.yml up -d --wait --wait-timeo
 - Evolution API: `http://localhost:8080`
 - Evolution Manager: `http://localhost:3101`
 - n8n: `http://n8n.local:5678`
-
+- Evolution Manager Conexão Chatwoot: `http://host.docker.internal:3002`
 ## Hosts do Windows
 
 Para usar `n8n.local`, adicione no arquivo `hosts`:

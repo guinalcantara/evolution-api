@@ -77,6 +77,7 @@ curl -I http://localhost:3101/
 - Chatwoot no navegador: `http://localhost:3002`
 - Evolution API: `http://localhost:8080`
 - Evolution Manager: `http://localhost:3101`
+- Evolution Manager Conexão Chatwoot: `http://host.docker.internal:3002`
 - N8N: `http://n8n.local:5678`
 - Webhook do Chatwoot para esta instancia: `http://api:8080/chatwoot/webhook/guilherme-telefone`
 
