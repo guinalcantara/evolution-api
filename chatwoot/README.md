@@ -9,12 +9,19 @@ Este diretório reúne os `docker-compose` usados para subir:
 ## Requisitos
 
 - Docker Desktop ou Docker Engine em execucao
-- Rede compartilhada `chatwoot-net`
+- Docker Compose v2 (`docker compose`)
 
-Crie a rede apenas se ela ainda nao existir:
+Os arquivos usam a mesma rede Docker externa (`chatwoot-net`). Crie-a uma única vez
+caso ainda não exista:
 
 ```bash
 docker network inspect chatwoot-net >/dev/null 2>&1 || docker network create chatwoot-net
+```
+
+No PowerShell, use:
+
+```powershell
+docker network inspect chatwoot-net *> $null; if ($LASTEXITCODE -ne 0) { docker network create chatwoot-net }
 ```
 
 ## Subir os servicos

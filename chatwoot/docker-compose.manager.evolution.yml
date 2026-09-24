@@ -3,6 +3,9 @@ services:
     build:
       context: ../evolution-manager-v2
       dockerfile: Dockerfile
+      args:
+        VITE_EVOLUTION_API_URL: http://localhost:8080
+        VITE_EVOLUTION_API_KEY: evolution-local-api-key-2026
     container_name: evolution_manager_official
     restart: unless-stopped
     env_file:
