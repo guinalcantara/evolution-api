@@ -34,7 +34,12 @@ lerna-debug.log*
 # Project related
 /instances/*
 !/instances/.gitkeep
-/test/
+/test/*
+!/test/all.test.ts
+!/test/chatwoot-message-normalizer.test.ts
+!/test/fixtures/
+!/test/fixtures/chatwoot/
+!/test/fixtures/chatwoot/interactive-messages.json
 /src/env.yml
 /store
 *.env

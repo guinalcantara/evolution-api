@@ -2,6 +2,10 @@ import { InstanceDto } from '@api/dto/instance.dto';
 import { Options, Quoted, SendAudioDto, SendMediaDto, SendTextDto } from '@api/dto/sendMessage.dto';
 import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
 import { postgresClient } from '@api/integrations/chatbot/chatwoot/libs/postgres.client';
+import {
+  ChatwootConversationButtonOption,
+  ChatwootMessageNormalizer,
+} from '@api/integrations/chatbot/chatwoot/services/chatwoot-message-normalizer';
 import { chatwootImport } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-import-helper';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { CacheService } from '@api/services/cache.service';
@@ -41,21 +45,31 @@ interface ChatwootMessage {
   isRead?: boolean;
 }
 
-interface ChatwootConversationButtonOption {
-  index: number;
-  label: string;
-  id: string;
+type ConversationReplyDirection = 'incoming' | 'outgoing';
+
+interface ChatwootConversationMenuState {
+  sourceMessageId?: string;
+  sourceMessageType?: string;
+  remoteJid?: string;
+  expectedReplyDirection: ConversationReplyDirection;
+  active: boolean;
+  buttons: ChatwootConversationButtonOption[];
+  updatedAt: number;
 }
 
 interface ChatwootConversationState {
+  version: 1;
+  instanceName: string;
+  conversationId: number;
+  menus: ChatwootConversationMenuState[];
   awaitingNumericReply: boolean;
   buttons: ChatwootConversationButtonOption[];
-  sourceMessageType?: string;
   updatedAt: number;
 }
 
 export class ChatwootService {
   private readonly logger = new Logger('ChatwootService');
+  private readonly messageNormalizer = new ChatwootMessageNormalizer();
 
   // Lock polling delay
   private readonly LOCK_POLLING_DELAY_MS = 300; // Delay between lock status checks
@@ -1465,21 +1479,8 @@ export class ChatwootService {
           return { message: 'bot' };
         }
 
-        const conversationState = body.conversation?.id
-          ? await this.getConversationState(instance, body.conversation.id)
-          : null;
-        const selectedButton = conversationState?.awaitingNumericReply
-          ? this.getNumericButtonSelection(messageReceived, conversationState.buttons)
-          : null;
-
-        if (selectedButton) {
-          this.logger.info(
-            `Mapping numeric reply "${messageReceived}" to button "${selectedButton.label}" for conversation ${body.conversation.id}`,
-          );
-          messageReceived = selectedButton.label;
-        }
-
-        const repliedChatwootMessageId = body.content_attributes?.in_reply_to || body.content_attributes?.in_reply_to_external_id;
+        const repliedChatwootMessageId =
+          body.content_attributes?.in_reply_to || body.content_attributes?.in_reply_to_external_id;
         const repliedChatwootMessage = repliedChatwootMessageId
           ? await this.prismaRepository.message.findFirst({
               where: {
@@ -1488,136 +1489,114 @@ export class ChatwootService {
               },
             })
           : null;
-        const repliedChatwootMessagePayload = repliedChatwootMessage?.message
-          ? this.unwrapMessage(repliedChatwootMessage.message)
+        const repliedSourceMessageId = (repliedChatwootMessage?.key as WAMessageKey | undefined)?.id;
+        const conversationState = body.conversation?.id
+          ? await this.getConversationState(instance, body.conversation.id)
           : null;
-        const isReplyToInteractiveMessage =
-          repliedChatwootMessagePayload && this.extractButtonsFromMessage(repliedChatwootMessagePayload).length > 0;
-        const isNumericReply = /^\d{1,2}(?:[.)])?$/.test((body.content || '').trim());
-        const isRecentInteractiveReply =
-          isNumericReply && body.conversation?.id
-            ? await this.hasRecentInteractiveConversationMessage(instance, body.conversation.id, body.id)
-            : false;
+        const conversationMenu = repliedSourceMessageId
+          ? this.getConversationMenu(conversationState, 'outgoing', chatId, repliedSourceMessageId)
+          : this.getConversationMenu(conversationState, 'outgoing', chatId);
+        const selectedButton = conversationMenu
+          ? this.getNumericButtonSelection(messageReceived, conversationMenu.buttons)
+          : null;
+
+        if (selectedButton) {
+          this.logger.info(
+            `Mapping numeric reply "${messageReceived}" to button "${selectedButton.label}" for conversation ${body.conversation.id}`,
+          );
+          messageReceived = selectedButton.label;
+        }
         const quotedReply = selectedButton
           ? (await this.getLastCustomerQuotedMessage(instance, body.conversation.id, chatId)) ||
             (await this.getQuotedMessage(body, instance))
           : await this.getQuotedMessage(body, instance);
-        const isInteractiveReplyContext =
-          conversationState?.awaitingNumericReply ||
-          selectedButton ||
-          isReplyToInteractiveMessage ||
-          isRecentInteractiveReply;
-        const disableSignatureForThisReply = isInteractiveReplyContext && this.provider.signMsg;
-        const originalSignMsg = this.provider.signMsg;
-        const originalSignDelimiter = this.provider.signDelimiter;
-        if (disableSignatureForThisReply) {
-          this.provider.signMsg = false;
-          this.provider.signDelimiter = null;
-        }
-        const shouldUseSignature = this.provider.signMsg && !isInteractiveReplyContext;
-        const messageForWhatsApp = isInteractiveReplyContext
-          ? this.stripOutgoingSignature(messageReceived, senderName)
-          : messageReceived;
+        const isInteractiveReplyContext = Boolean(selectedButton);
+        let formatText = this.formatOutgoingText(messageReceived, senderName, isInteractiveReplyContext);
 
-        try {
-          let formatText: string;
-          if (senderName === null || senderName === undefined) {
-            formatText = messageForWhatsApp;
-          } else {
-            const formattedDelimiter = this.provider.signDelimiter
-              ? this.provider.signDelimiter.replaceAll('\\n', '\n')
-              : '\n';
-            const textToConcat = shouldUseSignature ? [`*${senderName}:*`] : [];
-            textToConcat.push(messageForWhatsApp);
-
-            formatText = textToConcat.join(formattedDelimiter);
-          }
-
-          for (const message of body.conversation.messages) {
-            if (message.attachments && message.attachments.length > 0) {
-              for (const attachment of message.attachments) {
-                if (!messageReceived) {
-                  formatText = null;
-                }
-
-                const options: Options = {
-                  quoted: quotedReply,
-                };
-
-                const messageSent = await this.sendAttachment(
-                  waInstance,
-                  chatId,
-                  attachment.data_url,
-                  formatText,
-                  options,
-                );
-                if (!messageSent && body.conversation?.id) {
-                  this.onSendMessageError(instance, body.conversation?.id);
-                }
-
-                await this.updateChatwootMessageId(
-                  {
-                    ...messageSent,
-                  },
-                  {
-                    messageId: body.id,
-                    inboxId: body.inbox?.id,
-                    conversationId: body.conversation?.id,
-                    contactInboxSourceId: body.conversation?.contact_inbox?.source_id,
-                  },
-                  instance,
-                );
+        for (const message of body.conversation.messages) {
+          if (message.attachments && message.attachments.length > 0) {
+            for (const attachment of message.attachments) {
+              if (!messageReceived) {
+                formatText = null;
               }
-            } else {
-              const data: SendTextDto = {
-                number: chatId,
-                text: formatText,
-                delay: Math.floor(Math.random() * (2000 - 500 + 1)) + 500,
+
+              const options: Options = {
                 quoted: quotedReply,
               };
 
-              sendTelemetry('/message/sendText');
-
-              let messageSent: any;
-              try {
-                messageSent = await waInstance?.textMessage(data, true);
-                if (!messageSent) {
-                  throw new Error('Message not sent');
-                }
-
-                if (Long.isLong(messageSent?.messageTimestamp)) {
-                  messageSent.messageTimestamp = messageSent.messageTimestamp?.toNumber();
-                }
-
-                await this.updateChatwootMessageId(
-                  {
-                    ...messageSent,
-                  },
-                  {
-                    messageId: body.id,
-                    inboxId: body.inbox?.id,
-                    conversationId: body.conversation?.id,
-                    contactInboxSourceId: body.conversation?.contact_inbox?.source_id,
-                  },
-                  instance,
-                );
-              } catch (error) {
-                if (!messageSent && body.conversation?.id) {
-                  this.onSendMessageError(instance, body.conversation?.id, error);
-                }
-                throw error;
+              const messageSent = await this.sendAttachment(
+                waInstance,
+                chatId,
+                attachment.data_url,
+                formatText,
+                options,
+              );
+              if (!messageSent && body.conversation?.id) {
+                this.onSendMessageError(instance, body.conversation?.id);
               }
+
+              await this.updateChatwootMessageId(
+                {
+                  ...messageSent,
+                },
+                {
+                  messageId: body.id,
+                  inboxId: body.inbox?.id,
+                  conversationId: body.conversation?.id,
+                  contactInboxSourceId: body.conversation?.contact_inbox?.source_id,
+                },
+                instance,
+              );
             }
-          }
-        } finally {
-          if (disableSignatureForThisReply) {
-            this.provider.signMsg = originalSignMsg;
-            this.provider.signDelimiter = originalSignDelimiter;
+          } else {
+            const data: SendTextDto = {
+              number: chatId,
+              text: formatText,
+              delay: Math.floor(Math.random() * (2000 - 500 + 1)) + 500,
+              quoted: quotedReply,
+            };
+
+            sendTelemetry('/message/sendText');
+
+            let messageSent: any;
+            try {
+              messageSent = await waInstance?.textMessage(data, true);
+              if (!messageSent) {
+                throw new Error('Message not sent');
+              }
+
+              if (Long.isLong(messageSent?.messageTimestamp)) {
+                messageSent.messageTimestamp = messageSent.messageTimestamp?.toNumber();
+              }
+
+              await this.updateChatwootMessageId(
+                {
+                  ...messageSent,
+                },
+                {
+                  messageId: body.id,
+                  inboxId: body.inbox?.id,
+                  conversationId: body.conversation?.id,
+                  contactInboxSourceId: body.conversation?.contact_inbox?.source_id,
+                },
+                instance,
+              );
+            } catch (error) {
+              if (!messageSent && body.conversation?.id) {
+                this.onSendMessageError(instance, body.conversation?.id, error);
+              }
+              throw error;
+            }
           }
         }
 
-        if (conversationState?.awaitingNumericReply && body.conversation?.id) {
-          await this.clearConversationState(instance, body.conversation.id);
+        if (selectedButton && conversationMenu && body.conversation?.id) {
+          await this.clearConversationState(
+            instance,
+            body.conversation.id,
+            conversationMenu.expectedReplyDirection,
+            conversationMenu.sourceMessageId,
+          );
         }
 
         const chatwootRead = this.configService.get<Chatwoot>('CHATWOOT').MESSAGE_READ;
@@ -1782,32 +1761,159 @@ export class ChatwootService {
     return `${instance.instanceName}:chatwoot:conversation-state:${conversationId}`;
   }
 
-  private async getConversationState(instance: InstanceDto, conversationId: number): Promise<ChatwootConversationState | null> {
+  private async getConversationState(
+    instance: InstanceDto,
+    conversationId: number,
+  ): Promise<ChatwootConversationState | null> {
     const cacheKey = this.getConversationStateKey(instance, conversationId);
 
     if (!(await this.cache.has(cacheKey))) {
       return null;
     }
 
-    return (await this.cache.get(cacheKey)) as ChatwootConversationState;
+    const state = (await this.cache.get(cacheKey)) as Partial<ChatwootConversationState> | undefined;
+    if (!state) {
+      return null;
+    }
+
+    if (Array.isArray(state.menus)) {
+      return {
+        version: 1,
+        instanceName: state.instanceName ?? instance.instanceName,
+        conversationId: state.conversationId ?? conversationId,
+        menus: state.menus,
+        awaitingNumericReply: state.awaitingNumericReply ?? state.menus.length > 0,
+        buttons: state.buttons ?? state.menus[state.menus.length - 1]?.buttons ?? [],
+        updatedAt: state.updatedAt ?? state.menus[state.menus.length - 1]?.updatedAt ?? 0,
+      };
+    }
+
+    if (state.awaitingNumericReply && Array.isArray(state.buttons)) {
+      const legacyMenu: ChatwootConversationMenuState = {
+        buttons: state.buttons,
+        expectedReplyDirection: 'incoming',
+        active: true,
+        updatedAt: state.updatedAt ?? 0,
+      };
+
+      return {
+        version: 1,
+        instanceName: instance.instanceName,
+        conversationId,
+        menus: [legacyMenu],
+        awaitingNumericReply: true,
+        buttons: state.buttons,
+        updatedAt: legacyMenu.updatedAt,
+      };
+    }
+
+    return null;
   }
 
   private async setConversationState(
     instance: InstanceDto,
     conversationId: number,
-    state: ChatwootConversationState,
+    menu: Omit<ChatwootConversationMenuState, 'active'>,
     ttl = this.CHATWOOT_CONVERSATION_STATE_TTL_SECONDS,
   ) {
     const cacheKey = this.getConversationStateKey(instance, conversationId);
-    await this.cache.set(cacheKey, state, ttl);
+    const currentState = await this.getConversationState(instance, conversationId);
+    const menus = (currentState?.menus ?? [])
+      .filter(
+        (currentMenu) =>
+          currentMenu.sourceMessageId !== menu.sourceMessageId ||
+          currentMenu.expectedReplyDirection !== menu.expectedReplyDirection,
+      )
+      .map((currentMenu) =>
+        currentMenu.expectedReplyDirection === menu.expectedReplyDirection
+          ? { ...currentMenu, active: false }
+          : currentMenu,
+      )
+      .concat({ ...menu, active: true })
+      .sort((left, right) => left.updatedAt - right.updatedAt)
+      .slice(-6);
+
+    await this.cache.set(
+      cacheKey,
+      {
+        version: 1,
+        instanceName: instance.instanceName,
+        conversationId,
+        menus,
+        awaitingNumericReply: menus.length > 0,
+        buttons: menu.buttons,
+        updatedAt: menu.updatedAt,
+      } satisfies ChatwootConversationState,
+      ttl,
+    );
   }
 
-  private async clearConversationState(instance: InstanceDto, conversationId: number) {
+  private getConversationMenu(
+    state: ChatwootConversationState | null,
+    expectedReplyDirection: ConversationReplyDirection,
+    remoteJid?: string,
+    sourceMessageId?: string,
+  ) {
+    if (!state) {
+      return null;
+    }
+
+    const compatibleMenus = state.menus.filter(
+      (menu) =>
+        menu.expectedReplyDirection === expectedReplyDirection &&
+        (!remoteJid || !menu.remoteJid || menu.remoteJid === remoteJid),
+    );
+
+    if (sourceMessageId) {
+      return compatibleMenus.find((menu) => menu.sourceMessageId === sourceMessageId) ?? null;
+    }
+
+    const activeMenus = compatibleMenus.filter((menu) => menu.active !== false);
+    return activeMenus.length === 1 ? activeMenus[0] : null;
+  }
+
+  private async clearConversationState(
+    instance: InstanceDto,
+    conversationId: number,
+    expectedReplyDirection?: ConversationReplyDirection,
+    sourceMessageId?: string,
+  ) {
     const cacheKey = this.getConversationStateKey(instance, conversationId);
-    await this.cache.delete(cacheKey);
+    const currentState = await this.getConversationState(instance, conversationId);
+
+    if (!currentState || !expectedReplyDirection) {
+      await this.cache.delete(cacheKey);
+      return;
+    }
+
+    const menus = currentState.menus.filter(
+      (menu) =>
+        menu.expectedReplyDirection !== expectedReplyDirection ||
+        (sourceMessageId !== undefined && menu.sourceMessageId !== sourceMessageId),
+    );
+
+    if (menus.length === 0) {
+      await this.cache.delete(cacheKey);
+      return;
+    }
+
+    const latestMenu = menus[menus.length - 1];
+    await this.cache.set(
+      cacheKey,
+      {
+        version: 1,
+        instanceName: currentState.instanceName,
+        conversationId: currentState.conversationId,
+        menus,
+        awaitingNumericReply: true,
+        buttons: latestMenu?.buttons ?? [],
+        updatedAt: latestMenu?.updatedAt ?? Date.now(),
+      } satisfies ChatwootConversationState,
+      this.CHATWOOT_CONVERSATION_STATE_TTL_SECONDS,
+    );
   }
 
-  private safeParseJson(value: string) {
+  private safeParseJson(value: string): Record<string, any> {
     if (!value) {
       return {};
     }
@@ -1830,7 +1936,7 @@ export class ChatwootService {
 
     const escapedSenderName = this.escapeRegExp(senderName.trim());
     const signaturePatterns = [
-      new RegExp(`^\\s*\\*?${escapedSenderName}\\*?:\\s*(?:\\r?\\n)+`, 'i'),
+      new RegExp(`^\\s*\\*?${escapedSenderName}\\*?\\s*:\\*?\\s*(?:\\r?\\n)+`, 'i'),
       new RegExp(`^\\s*${escapedSenderName}:\\s*(?:\\r?\\n)+`, 'i'),
       new RegExp(`^\\s*\\*?${escapedSenderName}\\*?:\\s*$`, 'i'),
     ];
@@ -1843,92 +1949,28 @@ export class ChatwootService {
     return strippedContent.trimStart();
   }
 
-  private hasRecentInteractiveMessage(messages: any[], currentMessageId?: string | number) {
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return false;
+  private formatOutgoingText(
+    message: string,
+    senderName: string | null | undefined,
+    isInteractiveReplyContext: boolean,
+  ) {
+    const shouldUseSignature = this.provider.signMsg && !isInteractiveReplyContext;
+    const messageForWhatsApp = isInteractiveReplyContext ? this.stripOutgoingSignature(message, senderName) : message;
+
+    if (senderName === null || senderName === undefined) {
+      return messageForWhatsApp;
     }
 
-    const recentMessages = messages.slice(0, 5);
+    const signDelimiter = shouldUseSignature ? this.provider.signDelimiter : null;
+    const formattedDelimiter = signDelimiter ? signDelimiter.replaceAll('\\n', '\n') : '\n';
+    const textToConcat = shouldUseSignature ? [`*${senderName}:*`] : [];
+    textToConcat.push(messageForWhatsApp);
 
-    return recentMessages.some((message) => {
-      if (!message) {
-        return false;
-      }
-
-      if (currentMessageId !== undefined && String(message.id) === String(currentMessageId)) {
-        return false;
-      }
-
-      const payload = this.unwrapMessage(message.message ?? message);
-      return this.extractButtonsFromMessage(payload).length > 0;
-    });
-  }
-
-  private async hasRecentInteractiveConversationMessage(
-    instance: InstanceDto,
-    conversationId: number,
-    currentChatwootMessageId?: string | number,
-  ) {
-    const recentMessages = await this.prismaRepository.message.findMany({
-      where: {
-        instanceId: instance.instanceId,
-        chatwootConversationId: conversationId,
-        ...(currentChatwootMessageId
-          ? {
-              chatwootMessageId: {
-                not: Number(currentChatwootMessageId),
-              },
-            }
-          : {}),
-      },
-      orderBy: {
-        messageTimestamp: 'desc',
-      },
-      take: 5,
-    });
-
-    return recentMessages.some((message) => {
-      if (!message?.message) {
-        return false;
-      }
-
-      const payload = this.unwrapMessage(message.message);
-      return this.extractButtonsFromMessage(payload).length > 0;
-    });
+    return textToConcat.join(formattedDelimiter);
   }
 
   private extractButtonsFromMessage(msg: any): ChatwootConversationButtonOption[] {
-    const rawButtons =
-      msg?.buttonsMessage?.buttons ?? msg?.interactiveMessage?.nativeFlowMessage?.buttons ?? [];
-
-    if (!Array.isArray(rawButtons) || rawButtons.length === 0) {
-      return [];
-    }
-
-    return rawButtons
-      .map((button, index) => {
-        const buttonParams = this.safeParseJson(button?.buttonParamsJson);
-
-        const label =
-          buttonParams?.displayText ||
-          buttonParams?.display_text ||
-          buttonParams?.buttonText ||
-          buttonParams?.button_text ||
-          buttonParams?.title ||
-          button?.buttonText?.displayText ||
-          button?.buttonText ||
-          button?.name ||
-          `Opção ${index + 1}`;
-
-        const id = buttonParams?.id || buttonParams?.buttonId || button?.buttonId || button?.id || `${index + 1}`;
-
-        return {
-          index: index + 1,
-          label,
-          id,
-        };
-      })
-      .filter((button) => button.label && button.id);
+    return this.messageNormalizer.getSelectableOptions(msg);
   }
 
   private formatButtonsForChatwoot(title: string, buttons: ChatwootConversationButtonOption[], footer?: string) {
@@ -2015,53 +2057,11 @@ export class ChatwootService {
   }
 
   private getSelectedButtonFromPayload(message: any, buttons: ChatwootConversationButtonOption[]) {
-    if (!message || buttons.length === 0) {
-      return null;
-    }
-
-    const selectedButtonId =
-      message?.buttonsResponseMessage?.selectedButtonId ||
-      message?.templateButtonReplyMessage?.selectedId ||
-      message?.templateButtonReplyMessage?.selectedButtonId;
-
-    const selectedDisplayText =
-      message?.buttonsResponseMessage?.selectedDisplayText ||
-      message?.templateButtonReplyMessage?.selectedDisplayText ||
-      message?.templateButtonReplyMessage?.selectedButtonText;
-
-    if (selectedButtonId) {
-      const selectedById = buttons.find((button) => button.id === String(selectedButtonId));
-      if (selectedById) {
-        return selectedById;
-      }
-    }
-
-    if (selectedDisplayText) {
-      const selectedByText = buttons.find((button) => button.label === selectedDisplayText);
-      if (selectedByText) {
-        return selectedByText;
-      }
-    }
-
-    return null;
+    return this.messageNormalizer.findSelectedOption(message, buttons);
   }
 
   private isMediaMessage(message: any) {
-    const media = [
-      'imageMessage',
-      'documentMessage',
-      'documentWithCaptionMessage',
-      'audioMessage',
-      'videoMessage',
-      'stickerMessage',
-      'viewOnceMessageV2',
-    ];
-
-    const messageKeys = Object.keys(message);
-
-    const result = messageKeys.some((key) => media.includes(key));
-
-    return result;
+    return this.messageNormalizer.normalize(message).isMedia;
   }
 
   private isInteractiveButtonMessage(messageType: string, message: any) {
@@ -2104,25 +2104,6 @@ export class ChatwootService {
     return reactionMessage;
   }
 
-  private unwrapMessage(msg: any) {
-    let current = msg?.message ?? msg;
-
-    while (current) {
-      const wrappedMessage =
-        current?.ephemeralMessage?.message ??
-        current?.viewOnceMessage?.message ??
-        current?.viewOnceMessageV2?.message;
-
-      if (!wrappedMessage) {
-        break;
-      }
-
-      current = wrappedMessage;
-    }
-
-    return current;
-  }
-
   private getTypeMessage(msg: any) {
     const types = {
       conversation: msg.conversation,
@@ -2140,8 +2121,10 @@ export class ChatwootService {
       liveLocationMessage: msg.liveLocationMessage,
       buttonsMessage: msg.buttonsMessage,
       buttonsResponseMessage: msg.buttonsResponseMessage,
+      templateMessage: msg.templateMessage,
       templateButtonReplyMessage: msg.templateButtonReplyMessage,
       interactiveMessage: msg.interactiveMessage,
+      interactiveResponseMessage: msg.interactiveResponseMessage,
       listMessage: msg.listMessage,
       listResponseMessage: msg.listResponseMessage,
       viewOnceMessageV2:
@@ -2334,7 +2317,13 @@ export class ChatwootService {
   }
 
   public getConversationMessage(msg: any) {
-    const normalizedMsg = this.unwrapMessage(msg);
+    const normalizedInteractiveMessage = this.messageNormalizer.normalize(msg);
+    const interactiveContent = this.messageNormalizer.renderForChatwoot(normalizedInteractiveMessage);
+    if (interactiveContent) {
+      return interactiveContent;
+    }
+
+    const normalizedMsg = normalizedInteractiveMessage.content;
     const types = this.getTypeMessage(normalizedMsg);
 
     const messageContent = this.getMessageContent(types);
@@ -2394,14 +2383,9 @@ export class ChatwootService {
           return;
         }
 
-        if (body.message?.ephemeralMessage?.message) {
-          body.message = {
-            ...body.message?.ephemeralMessage?.message,
-          };
-        }
-
-        const messagePayload = this.unwrapMessage(body);
-        const originalMessage = await this.getConversationMessage(messagePayload);
+        const normalizedMessage = this.messageNormalizer.normalize(body);
+        const messagePayload = normalizedMessage.content;
+        const originalMessage = await this.getConversationMessage(body);
         const bodyMessage = originalMessage
           ? originalMessage
               .replaceAll(/\*((?!\s)([^\n*]+?)(?<!\s))\*/g, '**$1**')
@@ -2413,7 +2397,8 @@ export class ChatwootService {
           return;
         }
 
-        const quotedId = body.contextInfo?.stanzaId || body.message?.contextInfo?.stanzaId;
+        const quotedId =
+          normalizedMessage.contextInfo?.stanzaId || body.contextInfo?.stanzaId || body.message?.contextInfo?.stanzaId;
 
         let quotedMsg = null;
 
@@ -2430,15 +2415,15 @@ export class ChatwootService {
             },
           });
 
-        const isMedia = this.isMediaMessage(messagePayload);
+        const isMedia = this.isMediaMessage(messagePayload) || normalizedMessage.media.length > 0;
 
         const adsMessage = this.getAdsMessage(messagePayload);
 
         const reactionMessage = this.getReactionMessage(messagePayload);
-        const buttonOptions = this.extractButtonsFromMessage(messagePayload);
+        const buttonOptions = normalizedMessage.options;
+        const nativeFlowMessage = (messagePayload?.interactiveMessage as any)?.nativeFlowMessage;
         const isInteractiveButtonMessage =
-          messagePayload?.interactiveMessage?.nativeFlowMessage?.buttons?.some((button) => button?.name === 'payment_info') ||
-          false;
+          nativeFlowMessage?.buttons?.some((button) => button?.name === 'payment_info') || false;
 
         if (!bodyMessage && !isMedia && !reactionMessage && !isInteractiveButtonMessage && buttonOptions.length === 0) {
           this.logger.warn('no body message found');
@@ -2457,47 +2442,69 @@ export class ChatwootService {
         let incomingBodyMessage = bodyMessage;
         const incomingConversationState =
           !body.key.fromMe && conversationId ? await this.getConversationState(instance, conversationId) : null;
+        const responseSourceMessageId =
+          (typeof normalizedMessage.contextInfo?.stanzaId === 'string' && normalizedMessage.contextInfo.stanzaId) ||
+          (typeof body.contextInfo?.stanzaId === 'string' && body.contextInfo.stanzaId) ||
+          (typeof body.message?.contextInfo?.stanzaId === 'string' && body.message.contextInfo.stanzaId) ||
+          undefined;
+        const incomingConversationMenu = this.getConversationMenu(
+          incomingConversationState,
+          'incoming',
+          body.key.remoteJid,
+          responseSourceMessageId,
+        );
 
-        if (!body.key.fromMe && incomingConversationState?.awaitingNumericReply) {
+        if (!body.key.fromMe && incomingConversationMenu) {
           const selectedButton =
-            this.getNumericButtonSelection(incomingBodyMessage, incomingConversationState.buttons) ||
-            this.getSelectedButtonFromPayload(messagePayload, incomingConversationState.buttons);
+            this.getNumericButtonSelection(incomingBodyMessage, incomingConversationMenu.buttons) ||
+            this.getSelectedButtonFromPayload(messagePayload, incomingConversationMenu.buttons);
 
           if (selectedButton) {
             this.logger.info(
               `Mapping incoming reply "${incomingBodyMessage}" to button "${selectedButton.label}" for conversation ${conversationId}`,
             );
             incomingBodyMessage = selectedButton.label;
-            await this.clearConversationState(instance, conversationId);
+            await this.clearConversationState(
+              instance,
+              conversationId,
+              incomingConversationMenu.expectedReplyDirection,
+              incomingConversationMenu.sourceMessageId,
+            );
           }
         }
 
         const syncConversationButtonState = async () => {
-          if (messageType === 'outgoing') {
-            if (buttonOptions.length > 0) {
-              await this.setConversationState(instance, conversationId, {
-                awaitingNumericReply: true,
-                buttons: buttonOptions,
-                sourceMessageType: body.messageType,
-                updatedAt: Date.now(),
-              });
-            } else {
-              await this.clearConversationState(instance, conversationId);
-            }
-          } else {
-            await this.clearConversationState(instance, conversationId);
+          if (buttonOptions.length > 0) {
+            await this.setConversationState(instance, conversationId, {
+              sourceMessageId: body.key.id,
+              sourceMessageType: normalizedMessage.family ?? body.messageType,
+              remoteJid: body.key.remoteJid,
+              expectedReplyDirection: body.key.fromMe ? 'incoming' : 'outgoing',
+              buttons: buttonOptions,
+              updatedAt: Date.now(),
+            });
           }
         };
 
         if (isMedia) {
-          const downloadBase64 = await waInstance?.getBase64FromMediaMessage({
-            message: {
-              ...body,
-            },
-          });
+          const normalizedMedia = normalizedMessage.media[0];
+          const messageForDownload = normalizedMedia
+            ? {
+                ...body,
+                message: {
+                  [normalizedMedia.type]: normalizedMedia.content,
+                },
+              }
+            : body;
+          const downloadBase64 = await waInstance?.getBase64FromMediaMessage({ message: messageForDownload });
+
+          if (!downloadBase64) {
+            this.logger.warn('media payload could not be downloaded');
+            return;
+          }
 
           let nameFile: string;
-          const messageBody = body?.message[body?.messageType];
+          const messageBody = normalizedMedia?.content ?? body?.message[body?.messageType];
           const originalFilename =
             messageBody?.fileName || messageBody?.filename || messageBody?.message?.documentMessage?.fileName;
           if (originalFilename) {
@@ -2605,14 +2612,14 @@ export class ChatwootService {
         }
 
         if (isInteractiveButtonMessage) {
-          const buttons = messagePayload.interactiveMessage.nativeFlowMessage.buttons;
+          const buttons = nativeFlowMessage.buttons;
           this.logger.info('is Interactive Button Message: ' + JSON.stringify(buttons));
 
           for (const button of buttons) {
             const buttonParams = this.safeParseJson(button.buttonParamsJson);
-            const paymentSettings = buttonParams.payment_settings;
+            const paymentSettings = Array.isArray(buttonParams.payment_settings) ? buttonParams.payment_settings : [];
 
-            if (button.name === 'payment_info' && paymentSettings[0].type === 'pix_static_code') {
+            if (button.name === 'payment_info' && paymentSettings[0]?.type === 'pix_static_code') {
               const pixSettings = paymentSettings[0].pix_static_code;
               const pixKeyType = (() => {
                 switch (pixSettings.key_type) {
