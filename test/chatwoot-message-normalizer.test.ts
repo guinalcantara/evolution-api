@@ -82,6 +82,28 @@ test('classifies native flow actions and carousel cards', () => {
   assert.match(normalizer.renderForChatwoot(carousel) ?? '', /Cartão 1/);
 });
 
+test('keeps every supported selectable template option addressable by its number', () => {
+  const selectableTemplates = [
+    fixtures.buttons,
+    fixtures.hydratedTemplate,
+    fixtures.interactiveTemplate,
+    fixtures.fourRowTemplate,
+    fixtures.list,
+    fixtures.nativeFlow,
+    fixtures.carousel,
+  ];
+
+  for (const template of selectableTemplates) {
+    const options = normalizer.getSelectableOptions(template);
+
+    assert.ok(options.length > 0);
+    assert.deepEqual(
+      options.map((option) => option.index),
+      options.map((_, index) => index + 1),
+    );
+  }
+});
+
 test('extracts all supported interactive response families', () => {
   const responses = fixtures.responses;
 
@@ -169,6 +191,40 @@ test('keeps menu state scoped by conversation and removes only the consumed sour
       ?.sourceMessageId,
     'menu-c',
   );
+});
+
+test('matches an LID-backed menu to the Chatwoot phone identifier', async () => {
+  const records = new Map<string, unknown>();
+  const cache = new CacheService({
+    get: async (key: string) => records.get(key),
+    has: async (key: string) => records.has(key),
+    set: (key: string, value: unknown) => records.set(key, value),
+  } as any);
+  const service = new ChatwootService({} as any, {} as any, {} as any, cache) as any;
+  const instance = { instanceName: 'fixture-instance' } as any;
+
+  await service.setConversationState(instance, 12, {
+    sourceMessageId: 'lid-menu',
+    sourceMessageType: 'buttonsMessage',
+    remoteJid: '241265559994537@lid',
+    remoteJidAlt: '551130039303@s.whatsapp.net',
+    expectedReplyDirection: 'outgoing',
+    buttons: [
+      { index: 1, id: 'yes', label: 'Sim', actionType: 'select' },
+      { index: 2, id: 'no', label: 'Não', actionType: 'select' },
+      { index: 3, id: 'back', label: 'Voltar', actionType: 'select' },
+    ],
+    updatedAt: 30,
+  });
+
+  const menu = service.getConversationMenu(
+    await service.getConversationState(instance, 12),
+    'outgoing',
+    '551130039303',
+  );
+
+  assert.equal(menu?.sourceMessageId, 'lid-menu');
+  assert.equal(service.getNumericButtonSelection('3', menu.buttons)?.label, 'Voltar');
 });
 
 test('formats concurrent interactive and common replies without mutating the provider signature', async () => {

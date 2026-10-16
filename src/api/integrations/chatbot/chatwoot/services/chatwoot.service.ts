@@ -51,6 +51,7 @@ interface ChatwootConversationMenuState {
   sourceMessageId?: string;
   sourceMessageType?: string;
   remoteJid?: string;
+  remoteJidAlt?: string;
   expectedReplyDirection: ConversationReplyDirection;
   active: boolean;
   buttons: ChatwootConversationButtonOption[];
@@ -1861,7 +1862,10 @@ export class ChatwootService {
     const compatibleMenus = state.menus.filter(
       (menu) =>
         menu.expectedReplyDirection === expectedReplyDirection &&
-        (!remoteJid || !menu.remoteJid || menu.remoteJid === remoteJid),
+        (!remoteJid ||
+          (!menu.remoteJid && !menu.remoteJidAlt) ||
+          this.isSameConversationJid(menu.remoteJid, remoteJid) ||
+          this.isSameConversationJid(menu.remoteJidAlt, remoteJid)),
     );
 
     if (sourceMessageId) {
@@ -1870,6 +1874,14 @@ export class ChatwootService {
 
     const activeMenus = compatibleMenus.filter((menu) => menu.active !== false);
     return activeMenus.length === 1 ? activeMenus[0] : null;
+  }
+
+  private isSameConversationJid(left?: string, right?: string) {
+    if (!left || !right) {
+      return false;
+    }
+
+    return left.split('@')[0] === right.split('@')[0];
   }
 
   private async clearConversationState(
@@ -2479,6 +2491,7 @@ export class ChatwootService {
               sourceMessageId: body.key.id,
               sourceMessageType: normalizedMessage.family ?? body.messageType,
               remoteJid: body.key.remoteJid,
+              remoteJidAlt: body.key.remoteJidAlt,
               expectedReplyDirection: body.key.fromMe ? 'incoming' : 'outgoing',
               buttons: buttonOptions,
               updatedAt: Date.now(),
