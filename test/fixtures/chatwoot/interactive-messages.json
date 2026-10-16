@@ -1,0 +1,149 @@
+{
+  "buttons": {
+    "buttonsMessage": {
+      "contentText": "Confirma o agendamento?",
+      "footerText": "Escolha uma opção",
+      "buttons": [
+        { "buttonId": "confirm", "buttonText": { "displayText": "Confirmar" } },
+        { "buttonId": "cancel", "buttonText": { "displayText": "Cancelar" } }
+      ]
+    }
+  },
+  "hydratedTemplate": {
+    "templateMessage": {
+      "hydratedTemplate": {
+        "hydratedTitleText": "Agendamento",
+        "hydratedContentText": "Escolha um horário",
+        "hydratedFooterText": "Horários sujeitos a disponibilidade",
+        "imageMessage": { "mimetype": "image/jpeg", "mediaKey": "fixture" },
+        "hydratedButtons": [
+          { "quickReplyButton": { "displayText": "Manhã", "id": "morning" } },
+          { "urlButton": { "displayText": "Ver agenda", "url": "https://example.test/agenda" } }
+        ]
+      }
+    }
+  },
+  "interactiveTemplate": {
+    "templateMessage": {
+      "interactiveMessageTemplate": {
+        "body": { "text": "Escolha uma modalidade" },
+        "nativeFlowMessage": {
+          "buttons": [
+            { "name": "quick_reply", "buttonParamsJson": "{\"id\":\"telemedicine\",\"display_text\":\"Teleconsulta\"}" }
+          ]
+        }
+      }
+    }
+  },
+  "fourRowTemplate": {
+    "templateMessage": {
+      "fourRowTemplate": {
+        "highlyStructuredMessage": { "fallbackLg": "Agendamento" },
+        "content": { "fallbackLg": "Escolha uma especialidade" },
+        "footer": { "fallbackLg": "Atendimento sujeito a confirmação" },
+        "buttons": [
+          {
+            "quickReplyButton": {
+              "id": "cardiology",
+              "displayText": { "fallbackLg": "Cardiologia" }
+            }
+          },
+          {
+            "callButton": {
+              "displayText": { "fallbackLg": "Ligar para a clínica" },
+              "phoneNumber": { "fallbackLg": "+551100000000" }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "list": {
+    "listMessage": {
+      "title": "Serviços",
+      "description": "Selecione um serviço",
+      "sections": [
+        {
+          "title": "Consulta",
+          "rows": [
+            { "rowId": "consult-1", "title": "Primeira consulta", "description": "60 minutos" }
+          ]
+        },
+        {
+          "title": "Retorno",
+          "rows": [
+            { "rowId": "return-1", "title": "Primeira consulta", "description": "30 minutos" }
+          ]
+        }
+      ]
+    }
+  },
+  "nativeFlow": {
+    "interactiveMessage": {
+      "body": { "text": "Escolha uma ação" },
+      "nativeFlowMessage": {
+        "buttons": [
+          { "name": "quick_reply", "buttonParamsJson": "{\"id\":\"approve\",\"display_text\":\"Aprovar\"}" },
+          { "name": "cta_url", "buttonParamsJson": "{\"display_text\":\"Abrir site\",\"url\":\"https://example.test\"}" },
+          { "name": "payment_info", "buttonParamsJson": "{\"display_text\":\"Pagar por PIX\"}" }
+        ]
+      }
+    }
+  },
+  "carousel": {
+    "interactiveMessage": {
+      "body": { "text": "Planos disponíveis" },
+      "carouselMessage": {
+        "cards": [
+          {
+            "header": { "text": "Plano Básico" },
+            "body": { "text": "Para começar" },
+            "nativeFlowMessage": {
+              "buttons": [
+                { "name": "quick_reply", "buttonParamsJson": "{\"id\":\"basic\",\"title\":\"Escolher básico\"}" }
+              ]
+            }
+          },
+          {
+            "header": { "text": "Plano Premium", "imageMessage": { "mimetype": "image/jpeg", "mediaKey": "fixture" } },
+            "body": { "text": "Com mais recursos" },
+            "nativeFlowMessage": {
+              "buttons": [
+                { "name": "quick_reply", "buttonParamsJson": "{\"id\":\"premium\",\"title\":\"Escolher premium\"}" }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "responses": {
+    "buttons": { "buttonsResponseMessage": { "selectedButtonId": "confirm", "selectedDisplayText": "Confirmar" } },
+    "template": { "templateButtonReplyMessage": { "selectedId": "morning", "selectedDisplayText": "Manhã", "selectedCarouselCardIndex": 1 } },
+    "list": { "listResponseMessage": { "title": "Primeira consulta", "description": "60 minutos", "singleSelectReply": { "selectedRowId": "consult-1" } } },
+    "nativeValid": { "interactiveResponseMessage": { "body": { "text": "Formulário enviado" }, "nativeFlowResponseMessage": { "name": "galaxy_message", "version": "3", "paramsJson": "{\"appointment_id\":\"anonymous-123\",\"choice\":\"morning\"}" } } },
+    "nativeInvalid": { "interactiveResponseMessage": { "nativeFlowResponseMessage": { "name": "galaxy_message", "paramsJson": "{invalid" } } },
+    "nativeEmpty": { "interactiveResponseMessage": { "nativeFlowResponseMessage": { "name": "galaxy_message", "paramsJson": "" } } },
+    "nativeMissing": { "interactiveResponseMessage": {} }
+  },
+  "wrapped": {
+    "messageContextInfo": { "stanzaId": "ignored-metadata" },
+    "ephemeralMessage": {
+      "message": {
+        "viewOnceMessageV2Extension": {
+          "message": {
+            "buttonsMessage": {
+              "contentText": "Mensagem embrulhada",
+              "buttons": [{ "buttonId": "wrapped", "buttonText": { "displayText": "Continuar" } }]
+            }
+          }
+        }
+      }
+    }
+  },
+  "unknown": {
+    "futureCommerceMessage": {
+      "summary": "Conteúdo futuro"
+    }
+  }
+}
