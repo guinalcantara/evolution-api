@@ -4173,7 +4173,7 @@ export class BaileysStartupService extends ChannelStartupService {
         if (oldMessage?.key?.remoteJid !== jid) {
           throw new BadRequestException('RemoteJid does not match');
         }
-        if (oldMessage?.messageTimestamp > Date.now() + 900000) {
+        if (oldMessage?.messageTimestamp && Date.now() - Number(oldMessage.messageTimestamp) * 1000 >= 900000) {
           // 15 minutes in milliseconds
           throw new BadRequestException('Message is older than 15 minutes');
         }
