@@ -17,17 +17,19 @@ test('edits the mapped WhatsApp message once for a Chatwoot edit', async () => {
     instanceId: 'instance-id',
     client: { sendMessage: async (...args: unknown[]) => { sent.push(args); return { key: { id: 'edit-id' } }; } },
   };
+  let originalText = '*Test Agent:*\n--\nOriginal text';
   const service = new ChatwootService(
     { waInstances: { fixture: waInstance } } as any,
     {} as any,
-    { message: { findFirst: async () => ({ key, chatwootConversationId: 2, chatwootMessageId: 10 }) } } as any,
+    { message: { findFirst: async () => ({ key, message: { conversation: originalText }, chatwootConversationId: 2, chatwootMessageId: 10 }) } } as any,
     cache,
   ) as any;
   service.clientCw = async () => ({});
-  service.provider = { reopenConversation: true, url: 'https://chatwoot.example.com', accountId: 1, token: 'test-token' };
+  service.provider = { reopenConversation: true, url: 'https://chatwoot.example.com', accountId: 1, token: 'test-token', signMsg: false, signDelimiter: '\\n--\\n' };
   const body = {
     event: 'message_updated', id: 10, message_type: 'outgoing', content: 'Corrected text', content_changed: true,
     content_attributes: { edited: true, edit_request_id: 'request-1' },
+    sender: { name: 'Test Agent' },
     conversation: { meta: { sender: { identifier: '5511999999999' } }, messages: [] },
   };
 
@@ -35,7 +37,15 @@ test('edits the mapped WhatsApp message once for a Chatwoot edit', async () => {
   await service.receiveWebhook({ instanceName: 'fixture' }, body);
   await service.receiveWebhook({ instanceName: 'fixture' }, { ...body, content_changed: false });
 
-  assert.deepEqual(sent, [[key.remoteJid, { text: 'Corrected text', edit: key }]]);
+  assert.deepEqual(sent, [[key.remoteJid, { text: '*Test Agent:*\n--\nCorrected text', edit: key }]]);
+
+  originalText = '*Notice:*\nOriginal text without signature';
+  service.provider.signMsg = true;
+  await service.receiveWebhook({ instanceName: 'fixture' }, {
+    ...body,
+    content_attributes: { edited: true, edit_request_id: 'request-unsigned' },
+  });
+  assert.deepEqual(sent[1], [key.remoteJid, { text: 'Corrected text', edit: key }]);
 
   const reports: unknown[] = [];
   const originalPatch = axios.patch;

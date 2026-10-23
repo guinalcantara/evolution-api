@@ -1403,7 +1403,13 @@ export class ChatwootService {
         }
 
         try {
-          const result = await waInstance.client.sendMessage(key.remoteJid, { text: messageReceived, edit: key });
+          const originalContent = message.message as WAMessageContent;
+          const originalText = originalContent.conversation || originalContent.extendedTextMessage?.text;
+          const signatureMatch = originalText?.match(/^\*([^*\r\n]+):\*/);
+          const signature = signatureMatch?.[1] === senderName ? signatureMatch[0] : null;
+          const delimiter = this.provider.signDelimiter?.replaceAll('\\n', '\n') || '\n';
+          const editedText = signature ? `${signature}${delimiter}${messageReceived}` : messageReceived;
+          const result = await waInstance.client.sendMessage(key.remoteJid, { text: editedText, edit: key });
           if (!result) throw new Error('Baileys did not return an edited message');
           await this.cache.set(`${instance.instanceName}:edited:${editRequestId}`, true, 3600);
         } catch (error) {
