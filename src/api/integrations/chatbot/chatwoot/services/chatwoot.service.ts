@@ -1357,7 +1357,9 @@ export class ChatwootService {
       if (
         !body?.conversation ||
         body.private ||
-        (body.event === 'message_updated' && !body.content_attributes?.deleted)
+        (body.event === 'message_updated' &&
+          !body.content_attributes?.deleted &&
+          !(body.content_attributes?.edited && body.content_changed))
       ) {
         return { message: 'bot' };
       }
@@ -1376,6 +1378,56 @@ export class ChatwootService {
       const senderName = body?.conversation?.messages[0]?.sender?.available_name || body?.sender?.name;
       const waInstance = this.waMonitor.waInstances[instance.instanceName];
       instance.instanceId = waInstance.instanceId;
+
+      if (
+        body.event === 'message_updated' &&
+        body.content_attributes?.edited &&
+        body.content_changed &&
+        !body.content_attributes?.deleted
+      ) {
+        const editRequestId = body.content_attributes.edit_request_id;
+        if (!editRequestId || (await this.cache.has(`${instance.instanceName}:edited:${editRequestId}`))) {
+          return { message: 'bot' };
+        }
+
+        const message = await this.prismaRepository.message.findFirst({
+          where: { chatwootMessageId: body.id, instanceId: instance.instanceId },
+        });
+        const key = message?.key as WAMessageKey | undefined;
+
+        if (!key?.id || !key.remoteJid || !key.fromMe || !body.content?.trim()) {
+          this.logger.error(
+            `[CW.EDIT] Cannot edit Chatwoot message ${body.id}: missing outgoing WhatsApp message or text`,
+          );
+          return { message: 'bot' };
+        }
+
+        try {
+          const originalContent = message.message as WAMessageContent;
+          const originalText = originalContent.conversation || originalContent.extendedTextMessage?.text;
+          const signatureMatch = originalText?.match(/^\*([^*\r\n]+):\*/);
+          const signature = signatureMatch?.[1] === senderName ? signatureMatch[0] : null;
+          const delimiter = this.provider.signDelimiter?.replaceAll('\\n', '\n') || '\n';
+          const editedText = signature ? `${signature}${delimiter}${messageReceived}` : messageReceived;
+          const result = await waInstance.client.sendMessage(key.remoteJid, { text: editedText, edit: key });
+          if (!result) throw new Error('Baileys did not return an edited message');
+          await this.cache.set(`${instance.instanceName}:edited:${editRequestId}`, true, 3600);
+        } catch (error) {
+          this.logger.error(`[CW.EDIT] Failed to edit Chatwoot message ${body.id}: ${error}`);
+          if (message.chatwootConversationId && message.chatwootMessageId) {
+            try {
+              await axios.patch(
+                `${this.provider.url}/api/v1/accounts/${this.provider.accountId}/conversations/${message.chatwootConversationId}/messages/${message.chatwootMessageId}`,
+                { edit_error: 'WhatsApp rejected the message edit' },
+                { headers: { api_access_token: this.provider.token } },
+              );
+            } catch (reportError) {
+              this.logger.error(`[CW.EDIT] Failed to report edit error for message ${body.id}: ${reportError}`);
+            }
+          }
+        }
+        return { message: 'bot' };
+      }
 
       if (body.event === 'message_updated' && body.content_attributes?.deleted) {
         const message = await this.prismaRepository.message.findFirst({
@@ -2840,30 +2892,13 @@ export class ChatwootService {
 
         const key = message.key as WAMessageKey;
 
-        const messageType = key?.fromMe ? 'outgoing' : 'incoming';
-
-        if (message && message.chatwootConversationId && message.chatwootMessageId) {
-          // Criar nova mensagem com formato: "Mensagem editada:\n\nteste1"
-          const editedText = `\n\n\`${i18next.t('cw.message.edited')}:\`\n\n${editedMessageContent}`;
-
-          const send = await this.createMessage(
-            instance,
-            message.chatwootConversationId,
-            editedText,
-            messageType,
-            false,
-            [],
-            {
-              message: { extendedTextMessage: { contextInfo: { stanzaId: key.id } } },
-            },
-            'WAID:' + body.key.id,
-            null,
-          );
-          if (!send) {
-            this.logger.warn('edited message not sent');
-            return;
-          }
+        if (key?.fromMe) {
+          return;
         }
+
+        this.logger.info(
+          `[CW.EDIT] Incoming WhatsApp edit for ${message.chatwootMessageId} is outside outgoing edit scope`,
+        );
         return;
       }
 

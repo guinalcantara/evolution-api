@@ -37,6 +37,7 @@ lerna-debug.log*
 /test/*
 !/test/all.test.ts
 !/test/chatwoot-message-normalizer.test.ts
+!/test/chatwoot-message-edit.test.ts
 !/test/fixtures/
 !/test/fixtures/chatwoot/
 !/test/fixtures/chatwoot/interactive-messages.json
