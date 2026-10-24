@@ -64,3 +64,32 @@ test('edits the mapped WhatsApp message once for a Chatwoot edit', async () => {
   assert.equal(reports.length, 1);
   assert.deepEqual((reports[0] as unknown[])[1], { edit_error: 'WhatsApp rejected the message edit' });
 });
+
+test('updates the Chatwoot source ID through its API after sending', async () => {
+  const reports: unknown[] = [];
+  const originalPatch = axios.patch;
+  const service = new ChatwootService(
+    {} as any,
+    {} as any,
+    { $executeRaw: async () => 1 } as any,
+    {} as any,
+  ) as any;
+  service.provider = { url: 'https://chatwoot.example.com', accountId: 1, token: 'test-token' };
+  axios.patch = (async (...args: unknown[]) => { reports.push(args); return {}; }) as typeof axios.patch;
+
+  try {
+    await service.updateChatwootMessageId(
+      { key: { id: 'whatsapp-id' } },
+      { messageId: 10, conversationId: 2, inboxId: 1 },
+      { instanceId: 'instance-id' },
+    );
+  } finally {
+    axios.patch = originalPatch;
+  }
+
+  assert.deepEqual(reports, [[
+    'https://chatwoot.example.com/api/v1/accounts/1/conversations/2/messages/10',
+    { source_id: 'WAID:whatsapp-id' },
+    { headers: { api_access_token: 'test-token' } },
+  ]]);
+});
