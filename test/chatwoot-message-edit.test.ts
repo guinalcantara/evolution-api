@@ -39,13 +39,34 @@ test('edits the mapped WhatsApp message once for a Chatwoot edit', async () => {
 
   assert.deepEqual(sent, [[key.remoteJid, { text: '*Test Agent:*\n--\nCorrected text', edit: key }]]);
 
+  await service.receiveWebhook({ instanceName: 'fixture' }, {
+    ...body,
+    content: '**Test Agent:**\nCorrected text',
+    content_attributes: { edited: true, edit_request_id: 'request-prefixed' },
+  });
+  assert.deepEqual(sent[1], [key.remoteJid, { text: '*Test Agent:*\n--\nCorrected text', edit: key }]);
+
+  await service.receiveWebhook({ instanceName: 'fixture' }, {
+    ...body,
+    content: '**Notice:**\nCorrected text',
+    content_attributes: { edited: true, edit_request_id: 'request-other-prefix' },
+  });
+  assert.deepEqual(sent[2], [key.remoteJid, { text: '*Test Agent:*\n--\n*Notice:*\nCorrected text', edit: key }]);
+
   originalText = '*Notice:*\nOriginal text without signature';
   service.provider.signMsg = true;
   await service.receiveWebhook({ instanceName: 'fixture' }, {
     ...body,
     content_attributes: { edited: true, edit_request_id: 'request-unsigned' },
   });
-  assert.deepEqual(sent[1], [key.remoteJid, { text: 'Corrected text', edit: key }]);
+  assert.deepEqual(sent[3], [key.remoteJid, { text: 'Corrected text', edit: key }]);
+
+  await service.receiveWebhook({ instanceName: 'fixture' }, {
+    ...body,
+    content: '**Test Agent:**\nCorrected text',
+    content_attributes: { edited: true, edit_request_id: 'request-unsigned-prefix' },
+  });
+  assert.deepEqual(sent[4], [key.remoteJid, { text: '*Test Agent:*\nCorrected text', edit: key }]);
 
   const reports: unknown[] = [];
   const originalPatch = axios.patch;
