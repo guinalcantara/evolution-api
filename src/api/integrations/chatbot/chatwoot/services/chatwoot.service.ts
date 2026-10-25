@@ -1743,12 +1743,14 @@ export class ChatwootService {
 
     this.logger.verbose(`Update result: ${result} rows affected`);
 
-    if (this.isImportHistoryAvailable()) {
-      try {
-        await chatwootImport.updateMessageSourceID(chatwootMessageIds.messageId, key.id);
-      } catch (error) {
-        this.logger.error(`Error updating Chatwoot message source ID: ${error}`);
-      }
+    try {
+      await axios.patch(
+        `${this.provider.url}/api/v1/accounts/${this.provider.accountId}/conversations/${chatwootMessageIds.conversationId}/messages/${chatwootMessageIds.messageId}`,
+        { source_id: `WAID:${key.id}` },
+        { headers: { api_access_token: this.provider.token } },
+      );
+    } catch (error) {
+      this.logger.error(`Error updating Chatwoot message source ID: ${error}`);
     }
   }
 
