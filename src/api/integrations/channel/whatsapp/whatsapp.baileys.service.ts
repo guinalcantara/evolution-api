@@ -329,8 +329,6 @@ export class BaileysStartupService extends ChannelStartupService {
       }
     } else {
       this.logCallDiagnostic('CALL_REJECT_SKIPPED', call, { reason: 'reject_call_disabled' });
-      this.logCallDiagnostic('CALL_MESSAGE_SKIPPED', call, { reason: 'reject_call_disabled' });
-      return;
     }
 
     const messageActionKey = `message:${call.id}`;
@@ -348,14 +346,14 @@ export class BaileysStartupService extends ChannelStartupService {
     try {
       let recipientJid = call.from;
       if (recipientJid.endsWith('@lid')) {
-        recipientJid = await this.client.signalRepository.lidMapping.getPNForLID(recipientJid);
-        if (!recipientJid) {
-          throw new Error('No phone-number JID mapping found for call LID');
-        }
+        const mappedJid = await this.client.signalRepository.lidMapping.getPNForLID(recipientJid);
+        if (mappedJid) recipientJid = mappedJid;
       }
 
       const msg = await this.client.sendMessage(recipientJid, { text: settings.msgCall });
-      this.client.ev.emit('messages.upsert', { messages: [msg], type: 'notify' });
+      if (msg) {
+        this.client.ev.emit('messages.upsert', { messages: [msg], type: 'notify' });
+      }
       this.processedCallActions.set(messageActionKey, true);
       this.logCallDiagnostic('CALL_MESSAGE_COMPLETED', call);
     } catch (error) {

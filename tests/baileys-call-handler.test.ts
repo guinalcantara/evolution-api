@@ -72,11 +72,11 @@ describe('Baileys call handler', () => {
     assert.equal(context.emittedMessages.length, 1);
   });
 
-  it('does not reject or send when rejectCall is disabled', async () => {
+  it('sends the configured message without rejecting when rejectCall is disabled', async () => {
     await context.service.handleCallEvent(offer(), { rejectCall: false, msgCall: 'Automatic reply' });
 
     assert.equal(context.rejectedCalls.length, 0);
-    assert.equal(context.sentMessages.length, 0);
+    assert.equal(context.sentMessages.length, 1);
   });
 
   it('keeps rejection successful when message sending fails', async () => {
@@ -101,17 +101,19 @@ describe('Baileys call handler', () => {
     assert.ok(context.diagnostics.some((entry) => entry.event === 'CALL_REJECT_ERROR'));
   });
 
-  it('does not send to an unresolved LID and preserves rejection', async () => {
+  it('sends to the original LID when no phone-number mapping exists', async () => {
     context.service.client.signalRepository.lidMapping.getPNForLID = async () => undefined;
+    const call = offer({ from: '12345@lid' });
 
-    await context.service.handleCallEvent(offer({ from: '12345@lid' }), {
+    await context.service.handleCallEvent(call, {
       rejectCall: true,
       msgCall: 'Automatic reply',
     });
 
     assert.equal(context.rejectedCalls.length, 1);
-    assert.equal(context.sentMessages.length, 0);
-    assert.ok(context.diagnostics.some((entry) => entry.event === 'CALL_MESSAGE_ERROR'));
+    assert.deepEqual(context.sentMessages, [['12345@lid', { text: 'Automatic reply' }]]);
+    assert.equal(call.from, '12345@lid');
+    assert.ok(context.diagnostics.some((entry) => entry.event === 'CALL_MESSAGE_COMPLETED'));
   });
 
   it('ignores non-offer events', async () => {
