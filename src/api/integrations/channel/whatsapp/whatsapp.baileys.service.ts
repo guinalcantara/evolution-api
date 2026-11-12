@@ -125,6 +125,7 @@ import makeWASocket, {
   proto,
   UserFacingSocketConfig,
   WABrowserDescription,
+  WACallEvent,
   WAMediaUpload,
   WAMessage,
   WAMessageKey,
@@ -251,6 +252,7 @@ export class BaileysStartupService extends ChannelStartupService {
   private endSession = false;
   private logBaileys = this.configService.get<Log>('LOG').BAILEYS;
   private eventProcessingQueue: Promise<void> = Promise.resolve();
+  private readonly processedCallActions = new NodeCache({ stdTTL: 5 * 60, useClones: false });
 
   // Cache TTL constants (in seconds)
   private readonly MESSAGE_CACHE_TTL_SECONDS = 5 * 60; // 5 minutes - avoid duplicate message processing
@@ -262,6 +264,103 @@ export class BaileysStartupService extends ChannelStartupService {
 
   public get connectionStatus() {
     return this.stateConnection;
+  }
+
+  private getCallDiagnosticContext(call?: WACallEvent) {
+    return {
+      prefix: '[CALL_DIAG]',
+      instanceName: this.instance.name,
+      instanceId: this.instanceId,
+      connectionStatus: this.connectionStatus.state,
+      callId: call?.id,
+      callStatus: call?.status,
+      remoteJidHash: call?.from ? createHash('sha256').update(call.from).digest('hex').substring(0, 16) : undefined,
+    };
+  }
+
+  private logCallDiagnostic(event: string, call?: WACallEvent, details: Record<string, unknown> = {}) {
+    this.logger.info({
+      ...this.getCallDiagnosticContext(call),
+      event,
+      ...details,
+    });
+  }
+
+  private logCallDiagnosticError(event: string, error: unknown, call: WACallEvent) {
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+
+    this.logger.error({
+      ...this.getCallDiagnosticContext(call),
+      event,
+      errorMessage: normalizedError.message,
+      errorStack: normalizedError.stack,
+    });
+  }
+
+  private async handleCallEvent(call: WACallEvent, settings: wa.LocalSettings | null) {
+    const hasMsgCall = Boolean(settings?.msgCall?.trim());
+
+    this.logCallDiagnostic('CALL_RECEIVED', call, {
+      rejectCall: settings?.rejectCall,
+      settingsSource: 'database',
+      hasMsgCall,
+    });
+
+    if (call.status !== 'offer') {
+      this.logCallDiagnostic('CALL_IGNORED', call, { reason: 'status_not_offer' });
+      return;
+    }
+
+    this.logCallDiagnostic('CALL_FILTERS_PASSED', call);
+
+    const rejectActionKey = `reject:${call.id}`;
+    if (settings?.rejectCall) {
+      if (this.processedCallActions.has(rejectActionKey)) {
+        this.logCallDiagnostic('CALL_REJECT_SKIPPED', call, { reason: 'already_completed' });
+      } else {
+        this.logCallDiagnostic('CALL_REJECT_REQUESTED', call);
+        try {
+          await this.client.rejectCall(call.id, call.from);
+          this.processedCallActions.set(rejectActionKey, true);
+          this.logCallDiagnostic('CALL_REJECT_COMPLETED', call);
+        } catch (error) {
+          this.logCallDiagnosticError('CALL_REJECT_ERROR', error, call);
+        }
+      }
+    } else {
+      this.logCallDiagnostic('CALL_REJECT_SKIPPED', call, { reason: 'reject_call_disabled' });
+      this.logCallDiagnostic('CALL_MESSAGE_SKIPPED', call, { reason: 'reject_call_disabled' });
+      return;
+    }
+
+    const messageActionKey = `message:${call.id}`;
+    if (!hasMsgCall) {
+      this.logCallDiagnostic('CALL_MESSAGE_SKIPPED', call, { reason: 'message_not_configured' });
+      return;
+    }
+
+    if (this.processedCallActions.has(messageActionKey)) {
+      this.logCallDiagnostic('CALL_MESSAGE_SKIPPED', call, { reason: 'already_completed' });
+      return;
+    }
+
+    this.logCallDiagnostic('CALL_MESSAGE_REQUESTED', call);
+    try {
+      let recipientJid = call.from;
+      if (recipientJid.endsWith('@lid')) {
+        recipientJid = await this.client.signalRepository.lidMapping.getPNForLID(recipientJid);
+        if (!recipientJid) {
+          throw new Error('No phone-number JID mapping found for call LID');
+        }
+      }
+
+      const msg = await this.client.sendMessage(recipientJid, { text: settings.msgCall });
+      this.client.ev.emit('messages.upsert', { messages: [msg], type: 'notify' });
+      this.processedCallActions.set(messageActionKey, true);
+      this.logCallDiagnostic('CALL_MESSAGE_COMPLETED', call);
+    } catch (error) {
+      this.logCallDiagnosticError('CALL_MESSAGE_ERROR', error, call);
+    }
   }
 
   public async logoutInstance() {
@@ -703,14 +802,14 @@ export class BaileysStartupService extends ChannelStartupService {
 
     this.eventHandler();
 
+    this.logCallDiagnostic('CALL_LISTENER_INSTALLED', undefined, { listenerType: 'baileys_event_processor' });
+
     this.client.ws.on('CB:call', (packet) => {
-      console.log('CB:call', packet);
       const payload = { event: 'CB:call', packet: packet };
       this.sendDataWebhook(Events.CALL, payload, true, ['websocket']);
     });
 
     this.client.ws.on('CB:ack,class:call', (packet) => {
-      console.log('CB:ack,class:call', packet);
       const payload = { event: 'CB:ack,class:call', packet: packet };
       this.sendDataWebhook(Events.CALL, payload, true, ['websocket']);
     });
@@ -1881,22 +1980,10 @@ export class BaileysStartupService extends ChannelStartupService {
             const settings = await this.findSettings();
 
             if (events.call) {
-              const call = events.call[0];
-
-              if (settings?.rejectCall && call.status == 'offer') {
-                this.client.rejectCall(call.id, call.from);
+              for (const call of events.call) {
+                await this.handleCallEvent(call, settings);
+                this.sendDataWebhook(Events.CALL, call);
               }
-
-              if (settings?.msgCall?.trim().length > 0 && call.status == 'offer') {
-                if (call.from.endsWith('@lid')) {
-                  call.from = await this.client.signalRepository.lidMapping.getPNForLID(call.from as string);
-                }
-                const msg = await this.client.sendMessage(call.from, { text: settings.msgCall });
-
-                this.client.ev.emit('messages.upsert', { messages: [msg], type: 'notify' });
-              }
-
-              this.sendDataWebhook(Events.CALL, call);
             }
 
             if (events['connection.update']) {
