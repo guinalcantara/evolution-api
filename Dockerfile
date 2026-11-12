@@ -10,6 +10,7 @@ LABEL contact="contato@evolution-api.com"
 WORKDIR /evolution
 
 COPY ./package*.json ./
+COPY ./scripts ./scripts
 COPY ./tsconfig.json ./
 COPY ./tsup.config.ts ./
 
