@@ -125,6 +125,7 @@ import makeWASocket, {
   proto,
   UserFacingSocketConfig,
   WABrowserDescription,
+  WACallEvent,
   WAMediaUpload,
   WAMessage,
   WAMessageKey,
@@ -262,6 +263,35 @@ export class BaileysStartupService extends ChannelStartupService {
 
   public get connectionStatus() {
     return this.stateConnection;
+  }
+
+  private async handleCallEvent(call: WACallEvent, settings: wa.LocalSettings | null) {
+    if (call.status !== 'offer') return;
+
+    if (settings?.rejectCall) {
+      try {
+        await this.client.rejectCall(call.id, call.from);
+      } catch (error) {
+        this.logger.error(['Error rejecting call', error?.message, error?.stack]);
+      }
+    }
+
+    if (!settings?.msgCall?.trim()) return;
+
+    try {
+      let recipientJid = call.from;
+      if (recipientJid.endsWith('@lid')) {
+        const mappedJid = await this.client.signalRepository.lidMapping.getPNForLID(recipientJid);
+        if (mappedJid) recipientJid = mappedJid;
+      }
+
+      const msg = await this.client.sendMessage(recipientJid, { text: settings.msgCall });
+      if (msg) {
+        this.client.ev.emit('messages.upsert', { messages: [msg], type: 'notify' });
+      }
+    } catch (error) {
+      this.logger.error(['Error sending msgCall', error?.message, error?.stack]);
+    }
   }
 
   public async logoutInstance() {
@@ -1882,20 +1912,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
             if (events.call) {
               const call = events.call[0];
-
-              if (settings?.rejectCall && call.status == 'offer') {
-                this.client.rejectCall(call.id, call.from);
-              }
-
-              if (settings?.msgCall?.trim().length > 0 && call.status == 'offer') {
-                if (call.from.endsWith('@lid')) {
-                  call.from = await this.client.signalRepository.lidMapping.getPNForLID(call.from as string);
-                }
-                const msg = await this.client.sendMessage(call.from, { text: settings.msgCall });
-
-                this.client.ev.emit('messages.upsert', { messages: [msg], type: 'notify' });
-              }
-
+              await this.handleCallEvent(call, settings);
               this.sendDataWebhook(Events.CALL, call);
             }
 
