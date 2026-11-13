@@ -2905,10 +2905,24 @@ export class ChatwootService {
           return;
         }
 
-        this.logger.info(
-          `[CW.EDIT] Incoming WhatsApp edit for ${message.chatwootMessageId} is outside outgoing edit scope`,
+        if (!message.chatwootConversationId) {
+          this.logger.warn('[CW.EDIT] Conversation not found for incoming WhatsApp edit');
+          return;
+        }
+
+        // API inboxes do not offer a reliable inbound message edit endpoint.
+        // Send the corrected text as a reply so agents can see it immediately.
+        return await this.createMessage(
+          instance,
+          message.chatwootConversationId,
+          `[Mensagem editada no WhatsApp] ${editedMessageContent}`,
+          'incoming',
+          false,
+          undefined,
+          undefined,
+          undefined,
+          message,
         );
-        return;
       }
 
       if (event === 'messages.read') {
