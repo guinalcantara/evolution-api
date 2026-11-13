@@ -154,6 +154,7 @@ import { PassThrough, Readable } from 'stream';
 import { v4 } from 'uuid';
 
 import { BaileysMessageProcessor } from './baileysMessage.processor';
+import { decryptSecretMessageEdit } from './secret-message-edit';
 import { useVoiceCallsBaileys } from './voiceCalls/useVoiceCallsBaileys';
 
 export interface ExtendedIMessageKey extends proto.IMessageKey {
@@ -1216,8 +1217,35 @@ export class BaileysStartupService extends ChannelStartupService {
             }
           }
 
-          const editedMessage =
+          let encryptedOriginal: any;
+          let editedMessage =
             received?.message?.protocolMessage || received?.message?.editedMessage?.message?.protocolMessage;
+
+          const encryptedEdit =
+            received.message?.secretEncryptedMessage ??
+            received.message?.editedMessage?.message?.secretEncryptedMessage;
+          if (encryptedEdit?.secretEncType === proto.Message.SecretEncryptedMessage.SecretEncType.MESSAGE_EDIT) {
+            const targetId = encryptedEdit.targetMessageKey?.id;
+            const records = targetId
+              ? await this.prismaRepository.$queryRaw<any[]>`
+              SELECT * FROM "Message" WHERE "instanceId" = ${this.instanceId} AND "key"->>'id' = ${targetId}
+            `
+              : [];
+            const incomingJids = [received.key.remoteJid, received.key.remoteJidAlt].filter(Boolean);
+            encryptedOriginal = records.find(
+              (record) =>
+                record.key?.fromMe === received.key.fromMe &&
+                [record.key?.remoteJid, record.key?.remoteJidAlt].some((jid) => jid && incomingJids.includes(jid)),
+            );
+            const me = this.instance.authState.state.creds.me;
+            editedMessage =
+              encryptedOriginal &&
+              decryptSecretMessageEdit(received, encryptedOriginal.message, [me?.id, me?.lid].filter(Boolean));
+            if (!editedMessage) {
+              this.logger.warn(`Unable to decrypt WhatsApp message edit ${targetId}`);
+              continue;
+            }
+          }
 
           if (editedMessage) {
             if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled)
@@ -1233,7 +1261,7 @@ export class BaileysStartupService extends ChannelStartupService {
               await this.baileysCache.set(`protocol_${received.key.id}`, editedMessage.key.id, 60 * 60 * 24);
             }
 
-            const oldMessage = await this.getMessage(editedMessage.key, true);
+            const oldMessage = encryptedOriginal || (await this.getMessage(editedMessage.key, true));
             if ((oldMessage as any)?.id) {
               const editedMessageTimestamp = Long.isLong(received?.messageTimestamp)
                 ? Math.floor(received?.messageTimestamp.toNumber())
@@ -1242,7 +1270,10 @@ export class BaileysStartupService extends ChannelStartupService {
               await this.prismaRepository.message.update({
                 where: { id: (oldMessage as any).id },
                 data: {
-                  message: editedMessage.editedMessage as any,
+                  message: {
+                    ...editedMessage.editedMessage,
+                    messageContextInfo: (oldMessage as any).message?.messageContextInfo,
+                  } as any,
                   messageTimestamp: editedMessageTimestamp,
                   status: 'EDITED',
                 },

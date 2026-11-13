@@ -5,6 +5,25 @@ import axios from 'axios';
 import { ChatwootService } from '../src/api/integrations/chatbot/chatwoot/services/chatwoot.service';
 import { CacheService } from '../src/api/services/cache.service';
 
+test('delivers an incoming WhatsApp edit as a reply in Chatwoot', async () => {
+  const service = new ChatwootService({ waInstances: { fixture: {} } } as any, {} as any, {} as any, {} as any) as any;
+  const original = { key: { id: 'original', fromMe: false }, chatwootConversationId: 12, chatwootMessageId: 34 };
+  let created: any[];
+  service.clientCw = async () => ({});
+  service.provider = {};
+  service.getMessageByKeyId = async () => original;
+  service.createMessage = async (...args: any[]) => { created = args; };
+
+  await service.eventWhatsapp('messages.edit', { instanceName: 'fixture', instanceId: 'tenant' }, {
+    key: { id: 'original', remoteJid: '123@s.whatsapp.net' },
+    editedMessage: { conversation: 'corrected text' },
+  });
+  assert.equal(created[1], 12);
+  assert.equal(created[2], '[Mensagem editada no WhatsApp] corrected text');
+  assert.equal(created[3], 'incoming');
+  assert.equal(created[8], original);
+});
+
 test('edits the mapped WhatsApp message once for a Chatwoot edit', async () => {
   const sent: unknown[] = [];
   const records = new Map<string, unknown>();
