@@ -19,7 +19,7 @@ test('delivers an incoming WhatsApp edit as a reply in Chatwoot', async () => {
     editedMessage: { conversation: 'corrected text' },
   });
   assert.equal(created[1], 12);
-  assert.equal(created[2], '[Mensagem editada no WhatsApp] corrected text');
+  assert.equal(created[2], 'corrected text [editada]');
   assert.equal(created[3], 'incoming');
   assert.equal(created[8], original);
 });
