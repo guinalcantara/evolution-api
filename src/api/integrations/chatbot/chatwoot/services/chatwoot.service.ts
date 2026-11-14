@@ -2915,7 +2915,7 @@ export class ChatwootService {
         return await this.createMessage(
           instance,
           message.chatwootConversationId,
-          `[Mensagem editada no WhatsApp] ${editedMessageContent}`,
+          `${editedMessageContent} [editada]`,
           'incoming',
           false,
           undefined,
