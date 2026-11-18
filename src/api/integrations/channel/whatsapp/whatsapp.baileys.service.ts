@@ -1059,8 +1059,9 @@ export class BaileysStartupService extends ChannelStartupService {
 
           const processBatch = maxBatchTimestamp >= timestampLimitToImport;
 
-          if (!processBatch) {
-            return;
+          // Contact-only batches must still be processed, even without recent messages.
+          if (!processBatch && messages.length > 0) {
+            messages = [];
           }
         }
 
