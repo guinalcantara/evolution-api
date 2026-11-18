@@ -31,6 +31,8 @@ class ChatwootImport {
   private repositoryMessagesCache = new Map<string, Set<string>>();
   private historyMessages = new Map<string, Message[]>();
   private historyContacts = new Map<string, Contact[]>();
+  private importingContacts = new Set<string>();
+  private importingMessages = new Set<string>();
 
   public getRepositoryMessagesCache(instance: InstanceDto) {
     return this.repositoryMessagesCache.has(instance.instanceName)
@@ -79,6 +81,10 @@ class ChatwootImport {
   }
 
   public async importHistoryContacts(instance: InstanceDto, provider: ChatwootDto) {
+    if (this.importingContacts.has(instance.instanceName)) {
+      return;
+    }
+    this.importingContacts.add(instance.instanceName);
     try {
       if (this.getHistoryMessagesLenght(instance) > 0) {
         return;
@@ -88,7 +94,8 @@ class ChatwootImport {
 
       let totalContactsImported = 0;
 
-      const contacts = this.historyContacts.get(instance.instanceName) || [];
+      const pendingContacts = this.historyContacts.get(instance.instanceName) || [];
+      const contacts = Array.from(new Map(pendingContacts.map((contact) => [contact.remoteJid, contact])).values());
       if (contacts.length === 0) {
         return 0;
       }
@@ -150,8 +157,6 @@ class ChatwootImport {
 
         tagId = (await pgClient.query(sqlTag))?.rows[0]?.id;
 
-        await pgClient.query(sqlTag);
-
         let sqlInsertLabel = `INSERT INTO taggings (tag_id, taggable_type, taggable_id, context, created_at) VALUES `;
 
         contactsChunk.forEach((contact) => {
@@ -168,15 +173,25 @@ class ChatwootImport {
         contactsChunk = this.sliceIntoChunks(contacts, 3000);
       }
 
-      this.deleteHistoryContacts(instance);
+      const imported = new Set(pendingContacts);
+      this.historyContacts.set(
+        instance.instanceName,
+        (this.historyContacts.get(instance.instanceName) || []).filter((contact) => !imported.has(contact)),
+      );
 
       return totalContactsImported;
     } catch (error) {
       this.logger.error(`Error on import history contacts: ${error.toString()}`);
+    } finally {
+      this.importingContacts.delete(instance.instanceName);
     }
   }
 
-  public async getExistingSourceIds(sourceIds: string[], conversationId?: number): Promise<Set<string>> {
+  public async getExistingSourceIds(
+    sourceIds: string[],
+    conversationId?: number,
+    inboxId?: number,
+  ): Promise<Set<string>> {
     try {
       const existingSourceIdsSet = new Set<string>();
 
@@ -188,11 +203,16 @@ class ChatwootImport {
       const formattedSourceIds = sourceIds.map((sourceId) => `WAID:${sourceId.replace('WAID:', '')}`);
       const pgClient = postgresClient.getChatwootConnection();
 
-      const params = conversationId ? [formattedSourceIds, conversationId] : [formattedSourceIds];
-
-      const query = conversationId
-        ? 'SELECT source_id FROM messages WHERE source_id = ANY($1) AND conversation_id = $2'
-        : 'SELECT source_id FROM messages WHERE source_id = ANY($1)';
+      const params: any[] = [formattedSourceIds];
+      let query = 'SELECT source_id FROM messages WHERE source_id = ANY($1)';
+      if (conversationId) {
+        params.push(conversationId);
+        query += ` AND conversation_id = $${params.length}`;
+      }
+      if (inboxId) {
+        params.push(inboxId);
+        query += ` AND inbox_id = $${params.length}`;
+      }
 
       const result = await pgClient.query(query, params);
       for (const row of result.rows) {
@@ -212,6 +232,10 @@ class ChatwootImport {
     inbox: inbox,
     provider: ChatwootModel,
   ) {
+    if (this.importingMessages.has(instance.instanceName)) {
+      return;
+    }
+    this.importingMessages.add(instance.instanceName);
     try {
       const pgClient = postgresClient.getChatwootConnection();
 
@@ -222,7 +246,8 @@ class ChatwootImport {
 
       let totalMessagesImported = 0;
 
-      let messagesOrdered = this.historyMessages.get(instance.instanceName) || [];
+      const pendingMessages = [...(this.historyMessages.get(instance.instanceName) || [])];
+      let messagesOrdered = [...new Map(pendingMessages.map((message: any) => [message.key.id, message])).values()];
       if (messagesOrdered.length === 0) {
         return 0;
       }
@@ -253,8 +278,14 @@ class ChatwootImport {
         });
       });
 
-      const existingSourceIds = await this.getExistingSourceIds(messagesOrdered.map((message: any) => message.key.id));
-      messagesOrdered = messagesOrdered.filter((message: any) => !existingSourceIds.has(message.key.id));
+      const existingSourceIds = await this.getExistingSourceIds(
+        messagesOrdered.map((message: any) => message.key.id),
+        undefined,
+        inbox.id,
+      );
+      messagesOrdered = messagesOrdered.filter(
+        (message: any) => !existingSourceIds.has(`WAID:${message.key.id.replace(/^WAID:/, '')}`),
+      );
       // processing messages in batch
       const batchSize = 4000;
       let messagesChunk: Message[] = this.sliceIntoChunks(messagesOrdered, batchSize);
@@ -328,7 +359,11 @@ class ChatwootImport {
         messagesChunk = this.sliceIntoChunks(messagesOrdered, batchSize);
       }
 
-      this.deleteHistoryMessages(instance);
+      const imported = new Set(pendingMessages);
+      this.historyMessages.set(
+        instance.instanceName,
+        (this.historyMessages.get(instance.instanceName) || []).filter((message) => !imported.has(message)),
+      );
       this.deleteRepositoryMessagesCache(instance);
 
       const providerData: ChatwootDto = {
@@ -336,14 +371,13 @@ class ChatwootImport {
         ignoreJids: Array.isArray(provider.ignoreJids) ? provider.ignoreJids.map((event) => String(event)) : [],
       };
 
-      this.importHistoryContacts(instance, providerData);
+      await this.importHistoryContacts(instance, providerData);
 
       return totalMessagesImported;
     } catch (error) {
       this.logger.error(`Error on import history messages: ${error.toString()}`);
-
-      this.deleteHistoryMessages(instance);
-      this.deleteRepositoryMessagesCache(instance);
+    } finally {
+      this.importingMessages.delete(instance.instanceName);
     }
   }
 
