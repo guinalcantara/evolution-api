@@ -1054,15 +1054,6 @@ export class BaileysStartupService extends ChannelStartupService {
 
           const date = new Date();
           timestampLimitToImport = new Date(date.setDate(date.getDate() - daysLimitToImport)).getTime() / 1000;
-
-          const maxBatchTimestamp = Math.max(...messages.map((message) => message.messageTimestamp as number));
-
-          const processBatch = maxBatchTimestamp >= timestampLimitToImport;
-
-          // Contact-only batches must still be processed, even without recent messages.
-          if (!processBatch && messages.length > 0) {
-            messages = [];
-          }
         }
 
         const contactsMap = new Map();
@@ -1095,6 +1086,7 @@ export class BaileysStartupService extends ChannelStartupService {
         }
 
         const messagesRaw: any[] = [];
+        const chatwootMessagesRaw: any[] = [];
 
         const messagesRepository: Set<string> = new Set(
           chatwootImport.getRepositoryMessagesCache(instance) ??
@@ -1129,10 +1121,6 @@ export class BaileysStartupService extends ChannelStartupService {
             }
           }
 
-          if (messagesRepository?.has(m.key.id)) {
-            continue;
-          }
-
           if (!m.pushName && !m.key.fromMe) {
             const participantJid = m.participant || m.key.participant || m.key.remoteJid;
             if (participantJid && contactsMap.has(participantJid)) {
@@ -1142,7 +1130,13 @@ export class BaileysStartupService extends ChannelStartupService {
             }
           }
 
-          messagesRaw.push(this.prepareMessage(m));
+          const preparedMessage = this.prepareMessage(m);
+          if (preparedMessage.key?.remoteJid && !chatwootImport.isIgnorePhoneNumber(preparedMessage.key.remoteJid)) {
+            chatwootMessagesRaw.push(preparedMessage);
+          }
+          if (!messagesRepository.has(m.key.id)) {
+            messagesRaw.push(preparedMessage);
+          }
         }
 
         this.sendDataWebhook(Events.MESSAGES_SET, [...messagesRaw], true, undefined, {
@@ -1158,12 +1152,24 @@ export class BaileysStartupService extends ChannelStartupService {
           this.configService.get<Chatwoot>('CHATWOOT').ENABLED &&
           this.localChatwoot?.enabled &&
           this.localChatwoot.importMessages &&
-          messagesRaw.length > 0
+          chatwootMessagesRaw.length > 0
         ) {
-          this.chatwootService.addHistoryMessages(
-            instance,
-            messagesRaw.filter((msg) => !chatwootImport.isIgnorePhoneNumber(msg.key?.remoteJid)),
-          );
+          this.chatwootService.addHistoryMessages(instance, chatwootMessagesRaw);
+        }
+
+        this.logger.info(
+          `History batch type=${syncType} progress=${progress}: received=${messages.length}, ` +
+            `new=${messagesRaw.length}, eligibleForChatwoot=${chatwootMessagesRaw.length}`,
+        );
+
+        if (
+          progress === 100 &&
+          this.configService.get<Chatwoot>('CHATWOOT').ENABLED &&
+          this.localChatwoot?.enabled &&
+          this.localChatwoot.importMessages &&
+          this.isSyncNotificationFromUsedSyncType({ syncType })
+        ) {
+          await this.chatwootService.importHistoryMessages(instance);
         }
 
         await this.contactHandle['contacts.upsert'](
@@ -2140,12 +2146,6 @@ export class BaileysStartupService extends ChannelStartupService {
     ) {
       if (msg.chunkOrder === 1) {
         this.chatwootService.startImportHistoryMessages(instance);
-      }
-
-      if (msg.progress === 100) {
-        setTimeout(() => {
-          this.chatwootService.importHistoryMessages(instance);
-        }, 10000);
       }
     }
 
